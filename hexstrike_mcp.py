@@ -1444,7 +1444,7 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     )
     def john_crack(
         hash_file: str,
-        wordlist: str = "/usr/share/wordlists/rockyou.txt",
+        wordlist: str = "./wordlists/rockyou.txt",
         format_type: str = "",
         additional_args: str = ""
     ) -> Dict[str, Any]:
@@ -2955,7 +2955,7 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
         ),
     )
     def dirsearch_scan(url: str, extensions: str = "php,html,js,txt,xml,json",
-                      wordlist: str = "/usr/share/wordlists/dirsearch/common.txt",
+                      wordlist: str = "./wordlists/dirsearch/common.txt",
                       threads: int = 30, recursive: bool = False, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Dirsearch for advanced directory and file discovery with enhanced logging.
@@ -4162,10 +4162,10 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     )
     def httpx_probe(targets: str = "", target_file: str = "", ports: str = "", methods: str = "GET", status_code: str = "", content_length: bool = False, output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
-        Execute HTTPx for HTTP probing with enhanced logging.
+        Execute HTTPx for advanced HTTP probing with enhanced logging and multi-target support.
 
         Args:
-            targets: Target URLs or IPs
+            targets: Target URLs or IPs (comma-separated)
             target_file: File containing targets
             ports: Ports to probe
             methods: HTTP methods to use
@@ -4187,8 +4187,13 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             "output_file": output_file,
             "additional_args": additional_args
         }
-        logger.info(f"🌐 Starting HTTPx probing")
+        logger.info(f"🌐 Starting advanced HTTPx scan")
         result = hexstrike_client.safe_post("api/tools/httpx", data)
+        if result.get("success"):
+            logger.info(f"✅ HTTPx advanced scan completed")
+        else:
+            logger.error(f"❌ HTTPx advanced scan failed")
+        return result
         if result.get("success"):
             logger.info(f"✅ HTTPx probing completed")
         else:
