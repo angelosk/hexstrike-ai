@@ -6926,7 +6926,7 @@ def setup_logging():
 
 # Configuration (using existing API_PORT from top of file)
 DEBUG_MODE = os.environ.get("DEBUG_MODE", "0").lower() in ("1", "true", "yes", "y")
-COMMAND_TIMEOUT = 300  # 5 minutes default timeout
+COMMAND_TIMEOUT = int(os.environ.get("COMMAND_TIMEOUT", "300"))  # seconds; override via COMMAND_TIMEOUT env (issue #84)
 CACHE_SIZE = 1000
 CACHE_TTL = 3600  # 1 hour
 
@@ -9498,9 +9498,18 @@ def health_check():
                 "resolved": resolved,
                 "candidates": TOOL_BIN_ALIASES.get(tool, [tool]),
             }
+            if not available:
+                # Surface an install hint for every missing tool, not just the
+                # essential set, so operators/agents know how to fix it (issue #120).
+                tools_detail[tool]["install_hint"] = TOOL_INSTALL_HINTS.get(
+                    tool, f"'{tool}' not found on PATH; see README 'Install Security Tools'")
         except Exception:
             tools_status[tool] = False
-            tools_detail[tool] = {"available": False, "resolved": None, "candidates": [tool]}
+            tools_detail[tool] = {
+                "available": False, "resolved": None, "candidates": [tool],
+                "install_hint": TOOL_INSTALL_HINTS.get(
+                    tool, f"'{tool}' not found on PATH; see README 'Install Security Tools'"),
+            }
 
     all_essential_tools_available = all(tools_status.get(t, False) for t in essential_tools)
     missing_essential = [t for t in essential_tools if not tools_status.get(t, False)]
@@ -14921,16 +14930,43 @@ def zap():
             if api_key:
                 command += f" -config api.key={api_key}"
         else:
-            command = f"zaproxy -cmd -quickurl {target}"
-
-            if format_type:
-                command += f" -quickout {format_type}"
-
-            if output_file:
-                command += f" -quickprogress -dir \"{output_file}\""
-
+            # ZAP scan via the official helper scripts (baseline/full/api), which
+            # support -r/-x/-J report output. `zaproxy -cmd -quickurl` was removed
+            # from the quickstart CLI in 2.16 and the helper scripts aren't always
+            # packaged, so resolve a runner explicitly and fail with guidance if
+            # none is present (issues #78, #58).
+            scan_scripts = {
+                "baseline": os.environ.get("HEXSTRIKE_ZAP_BASELINE", "zap-baseline.py"),
+                "full": os.environ.get("HEXSTRIKE_ZAP_FULL", "zap-full-scan.py"),
+                "api": os.environ.get("HEXSTRIKE_ZAP_API", "zap-api-scan.py"),
+            }
+            script_name = scan_scripts.get(scan_type, scan_scripts["baseline"])
+            runner = shutil.which(script_name)
+            if not runner:
+                for cand in (f"/zap/{script_name}", f"/usr/share/zaproxy/{script_name}", f"/opt/zaproxy/{script_name}"):
+                    if os.path.isfile(cand):
+                        runner = cand
+                        break
+            if not runner:
+                return jsonify({
+                    "success": False,
+                    "error": (f"ZAP scan runner '{script_name}' not found. ZAP 2.16 removed the "
+                              f"'-cmd -quickurl' CLI, and the helper scripts are not always packaged. "
+                              f"Install the ZAP scan scripts (they ship with the zaproxy Docker image, "
+                              f"e.g. 'zaproxy/zap-stable' under /zap) or set HEXSTRIKE_ZAP_BASELINE / "
+                              f"HEXSTRIKE_ZAP_FULL / HEXSTRIKE_ZAP_API to their paths. See issue #78."),
+                    "scan_type": scan_type,
+                }), 501
+            # Report format -> flag (issue #58): -r HTML, -x XML, -J JSON
+            fmt = (format_type or "xml").lower()
+            flag = {"html": "-r", "xml": "-x", "json": "-J"}.get(fmt, "-x")
+            if not output_file:
+                ext = {"html": "html", "xml": "xml", "json": "json"}.get(fmt, "xml")
+                safe_target = re.sub(r"[^A-Za-z0-9._-]+", "_", str(target))[:80] or "target"
+                output_file = str(Path(tempfile.gettempdir()) / f"zap_{scan_type}_{safe_target}_{int(time.time())}.{ext}")
+            command = f"{shlex.quote(runner)} -t {shlex.quote(target)} {flag} {shlex.quote(output_file)}"
             if api_key:
-                command += f" -config api.key={api_key}"
+                command += f" -z {shlex.quote('api.key=' + api_key)}"
 
         if additional_args:
             command += f" {additional_args}"
@@ -15006,9 +15042,12 @@ def zap():
                 "timestamp": datetime.now().isoformat()
             })
 
-        logger.info(f"🔍 Starting ZAP scan: {target}")
+        logger.info(f"🔍 Starting ZAP {scan_type} scan: {target}")
         result = execute_command(command)
-        logger.info(f"📊 ZAP scan completed for {target}")
+        if isinstance(result, dict):
+            result["report_file"] = output_file
+            result["scan_type"] = scan_type
+        logger.info(f"📊 ZAP scan completed for {target} (report: {output_file})")
         return jsonify(result)
     except Exception as e:
         logger.error(f"💥 Error in zap endpoint: {str(e)}")

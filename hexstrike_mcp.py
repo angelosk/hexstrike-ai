@@ -388,16 +388,41 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
         "suggest_ctf_tools", "ctf_cryptography_solver", "ctf_forensics_analyzer", "ctf_binary_analyzer"
     }
 
+    # Operator tool filtering (issue #119): trim the exposed MCP tool set via env,
+    # useful when an MCP host caps the number of tools.
+    #   HEXSTRIKE_ENABLED_TOOLS  = comma/space-separated allow-list (only these register)
+    #   HEXSTRIKE_DISABLED_TOOLS = comma/space-separated deny-list
+    # Names match the tool function (e.g. "nmap_scan") or its binary ("nmap").
+    # Allow-list wins when both are set; exempt/helper tools always register.
+    def _parse_toolset(var):
+        return {t.strip() for t in os.environ.get(var, "").replace(",", " ").split() if t.strip()}
+    _enabled_tools = _parse_toolset("HEXSTRIKE_ENABLED_TOOLS")
+    _disabled_tools = _parse_toolset("HEXSTRIKE_DISABLED_TOOLS")
+    if _enabled_tools:
+        logger.info(f"🔧 HEXSTRIKE_ENABLED_TOOLS allow-list active ({len(_enabled_tools)} entries)")
+    if _disabled_tools:
+        logger.info(f"🔧 HEXSTRIKE_DISABLED_TOOLS deny-list active ({len(_disabled_tools)} entries)")
+
     def custom_mcp_tool(*args, **kwargs):
-        """Custom decorator override to filter tools based on OS binary availability."""
+        """Custom decorator override: filter tools by OS binary availability and by
+        the operator allow/deny lists (issue #119)."""
         def decorator(func):
             # Exempt helper functions from filtering
             if func.__name__ in EXEMPT_FUNCTIONS:
                 return original_mcp_tool(*args, **kwargs)(func)
-            
+
             # Find associated binary
             associated_tool = find_associated_tool(func.__name__)
-            
+
+            # Operator allow/deny filtering to trim the tool set (issue #119).
+            _names = {func.__name__} | ({associated_tool} if associated_tool else set())
+            if _enabled_tools and not (_names & _enabled_tools):
+                logger.info(f"🚫 Omitted tool (not in HEXSTRIKE_ENABLED_TOOLS): {func.__name__}")
+                return func
+            if _names & _disabled_tools:
+                logger.info(f"🚫 Omitted tool (in HEXSTRIKE_DISABLED_TOOLS): {func.__name__}")
+                return func
+
             is_available = True
             if backend_reachable and associated_tool:
                 is_available = tools_status.get(associated_tool, False)
