@@ -24,6 +24,17 @@
 
 ---
 
+## Agent Operations & Interface Docs
+
+- `AGENTS.md` - Persistent instructions for AI agents operating HexStrike MCP workflows.
+- `docs/update_check.md` - How to check and sync this fork with upstream `0x4m4/hexstrike-ai`.
+- `docs/interface_usage.md` - CLI-first usage guide plus GUI-ready interface contract.
+- `docs/agent_skill_repos.md` - Curated GitHub repositories for skills and MCP security references.
+- `docs/tool_study_guide.md` - Tool descriptions, use-cases, and guided workflows for study.
+- `hexstrike-tool-surface.json` - Machine-readable interface map for CLI clients and future GUI scaffolding.
+
+---
+
 <div align="center">
 
 ## Follow Our Social Accounts
@@ -112,21 +123,161 @@ graph TD
 
 ## Installation
 
+> **Full setup guide (including macOS-specific steps, Claude Desktop config, and troubleshooting):**
+> **👉 [SETUP.md](SETUP.md)**
+
 ### Quick Setup to Run the hexstrike MCPs Server
+Many tools, such as nmap, require elevated privileges for certain features. To avoid granting permissions to each tool individually, perform the setup steps below as the `root` user.
+> **Fork v6.0.1 (fixed):** this fork ships `./install.sh` — the recommended setup.
+> It scans your system, installs **only the missing tools** for the use-cases you
+> pick, sets up the Python venv, and writes the OpenCode MCP config automatically.
+
+### System Requirements
+
+```bash
+OS: Kali Linux 2024.1+ / Ubuntu 22.04+ / Debian 12+
+Python: 3.10 - 3.12 (3.13+ breaks pwntools/angr/mitmproxy builds — installer warns you)
+RAM: 8GB+ (16GB recommended) | Storage: 50GB+ free | CPU: 4+ cores
+```
+
+### Recommended: Automated Setup
+
+```bash
+# 1. Clone this fork
+git clone https://github.com/ZanderoDev/hexstrike-ai-update.git
+cd hexstrike-ai-update
+
+# 2. Run the installer (interactive — asks which use-cases you need)
+./install.sh
+
+# Non-interactive example (docs/VMs/CI):
+./install.sh --categories "network web exploit password" --yes
+
+# Verify server + tool coverage after install:
+./install.sh --check-health
+```
+
+**Installer options:**
+
+| Flag | Effect |
+|------|--------|
+| `--categories "network web ..."` | `network web exploit password osint wireless forensics cloud` or `all` (default if `--yes`: `network web exploit password`) |
+| `--yes, -y` | Non-interactive |
+| `--no-tools` | Python env + MCP config only, skip security tools |
+| `--with-browser` | Also install `selenium` extras (browser agent) |
+| `--with-proxy` | Also install `mitmproxy` extras (intercept agent) |
+| `--with-pwn` | Also install `pwntools` + `angr` extras (needs Python 3.11/3.12) |
+| `--with-all` | All three extras above |
+| `--with-opencode` | Also install OpenCode via npm |
+| `--check-health` | Start server, show `/health` coverage, leave it running |
+| `--port PORT` | Server port for config/health check (default `8888`) |
+
+### Alternative: Manual Setup
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/0x4m4/hexstrike-ai.git
-cd hexstrike-ai
+git clone https://github.com/ZanderoDev/hexstrike-ai-update.git
+cd hexstrike-ai-update
 
-# 2. Create virtual environment
+# 2. Create virtual environment (Python 3.10-3.12 recommended)
 python3 -m venv hexstrike-env
 source hexstrike-env/bin/activate  # Linux/Mac
 # hexstrike-env\Scripts\activate   # Windows
 
 # 3. Install Python dependencies
+#    macOS only: install unicorn pre-built wheel first to avoid cmake build errors
+#    pip install --only-binary=:all: unicorn
 pip3 install -r requirements.txt
+# 3. Install CORE Python dependencies (no heavy builds)
+pip install --upgrade pip
+pip install -r requirements.txt
 
+# 4. Optional extras — only what you need:
+pip install -r requirements-optional.txt            # everything below at once, or:
+pip install "selenium>=4.15.0,<5.0.0" "webdriver-manager>=4.0.0,<5.0.0"  # browser agent
+pip install "mitmproxy>=9.0.0,<11.0.0"              # proxy intercept agent
+pip install "pwntools>=4.10.0,<5.0.0" "bcrypt==4.0.1" "angr>=9.2.0,<10.0.0"  # pwn/RE endpoints
+```
+Ecco la versione corretta (inglese, struttura invariata):
+
+````markdown
+### 🐳 Docker Installation
+
+**Quick start**  
+*Note:* The helper scripts use `sudo`, and the container runs in `privileged` mode to ensure access to required capabilities (for example, the raw socket capability used by pentesting tools). You can harden the container based on your requirements, but additional checks are needed. See `docker-compose.yml` for capability details.
+
+Rationale:
+- Use the latest stable release of Kali Linux.
+- Install the latest tools using official methods (apt, official GitHub releases; compile only when necessary).
+- Provide a consistent, prebuilt, preconfigured, and reproducible environment that includes all required tools.
+
+```bash
+# 1) Clone the repository
+git clone https://github.com/0x4m4/hexstrike-ai.git
+cd hexstrike-ai
+chmod +x ./docker/*.sh
+
+# 2) Build the Docker image
+./docker/build-docker-image.sh
+
+# 3) Start the MCP server (host networking, privileged, caches persisted)
+./docker/start-docker-mcp-server.sh
+````
+
+**Verify installation**
+
+```bash
+# Health endpoint
+curl http://localhost:8888/health
+```
+
+### Update tool caches and databases
+
+The server starts immediately; a one-time background warmup runs automatically.
+To refresh caches explicitly (for example, before a batch of scans):
+
+```bash
+# Docker
+docker compose -f docker/docker-compose.yml exec hexstrike-mcp-server \
+  /usr/local/bin/update-tools-databases.sh
+```
+
+#### What gets updated
+
+* WPScan vulnerability database
+* Trivy database
+* Nuclei templates
+* ExploitDB (searchsploit)
+* Nikto signatures
+* Nmap NSE script database (`script.db`)
+* OWASP ZAP add-ons
+
+#### Where data is persisted (host → container)
+
+* `./data/trivy` → `/root/.cache/trivy`
+* `./data/wpscan` → `/root/.wpscan/db`
+* `./data/nuclei-templates` → `/root/nuclei-templates`
+* `./data/amass` → `/root/.config/amass`
+* `./data/msf` → `/root/.msf4`
+* `./data/exploitdb` → `/usr/share/exploitdb`
+* `./data/nikto` → `/var/lib/nikto`
+* `./data/zap` → `/root/.ZAP`
+* `./data/postgres` → `/var/lib/postgresql` (used by Clair and optional Metasploit databases)
+
+## Appendix: kube-bench - Host socket enablement (Docker/Podman)
+
+`kube-bench` needs a Docker-compatible API socket available inside the container at `/var/run/docker.sock`.
+`docker-compose.yml` already mounts the socket. If you use Docker Engine, nothing else to do. If you use Podman, enable the socket:
+
+```bash
+sudo systemctl enable --now podman.socket
+```
+
+Test inside the container:
+
+```bash
+sudo docker exec -it hexstrike-mcp-server bash
+docker ps
 ```
 
 ### Installation and Setting Up Guide for various AI Clients:
@@ -151,6 +302,10 @@ Refer to the video above for step-by-step instructions and integration examples 
 
 
 ### Install Security Tools
+
+> **Recommended:** `./install.sh` handles all of this — it detects what's already
+> installed and adds only the missing tools (apt/go/cargo/pipx/gem as appropriate).
+> The lists below are the reference catalogue the installer and `/health` use.
 
 **Core Tools (Essential):**
 ```bash
@@ -190,7 +345,10 @@ sudo apt update && sudo apt install google-chrome-stable
 ### Start the Server
 
 ```bash
-# Start the MCP server
+# Required: set an auth token — the server refuses to start without one
+export HEXSTRIKE_API_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# Start the MCP server (loopback-only by default)
 python3 hexstrike_server.py
 
 # Optional: Start with debug mode
@@ -198,44 +356,130 @@ python3 hexstrike_server.py --debug
 
 # Optional: Custom port configuration
 python3 hexstrike_server.py --port 8888
+
+# Optional: allowlist authorized engagement targets (see scope.example.json)
+export HEXSTRIKE_SCOPE_FILE=/path/to/scope.json
 ```
 
 ### Verify Installation
 
 ```bash
-# Test server health
-curl http://localhost:8888/health
+# Test server liveness (fast, no tool sweep)
+curl -H "X-HexStrike-Token: $HEXSTRIKE_API_TOKEN" http://localhost:8888/ping
+
+# Test server health (full tool-availability sweep, ~30s)
+curl -H "X-HexStrike-Token: $HEXSTRIKE_API_TOKEN" http://localhost:8888/health
+# Easiest: installer does a live check for you
+./install.sh --check-health
+
+# Manual: test server health (fast, alias-aware detection since v6.0.1)
+curl -s http://localhost:8888/health | python3 -m json.tool | head -n 40
+
+# Coverage per category + missing essential tools with install hints:
+curl -s http://localhost:8888/health | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); \
+   [print(f\"{c:15} {s['available']}/{s['total']}\") for c,s in sorted(d['category_stats'].items())]; \
+   print('missing essential:', d.get('missing_essential_tools') or 'none')"
 
 # Test AI agent capabilities
 curl -X POST http://localhost:8888/api/intelligence/analyze-target \
   -H "Content-Type: application/json" \
+  -H "X-HexStrike-Token: $HEXSTRIKE_API_TOKEN" \
   -d '{"target": "example.com", "analysis_type": "comprehensive"}'
 ```
+
+### Docker (recommended for real engagements)
+
+The included `Dockerfile` builds a self-contained image (Kali base + the core tool set + the Go-based recon tools) and isolates the server from your host filesystem. This is the safer path if you're pointing this at anything beyond your own lab — the server executes arbitrary commands (`/api/command`), so contain the blast radius rather than running it bare-metal.
+
+```bash
+docker build -t hexstrike-ai:latest .
+```
+
+Run one container per engagement, each with its own scope file and its own output directory, so concurrent engagements can't cross-contaminate and every engagement has an inspectable audit trail:
+
+```bash
+mkdir -p ./engagements/acme-corp/workspace
+cp scope.example.json ./engagements/acme-corp/scope.json   # edit: authorized domains/CIDRs only
+
+docker run -d --name hexstrike-acme-corp \
+  -p 127.0.0.1:8888:8888 \
+  --cap-add=NET_RAW --cap-add=NET_ADMIN \
+  -v "$(pwd)/engagements/acme-corp/workspace:/tmp/hexstrike_files" \
+  -v "$(pwd)/engagements/acme-corp/scope.json:/app/scope.json:ro" \
+  -e HEXSTRIKE_API_TOKEN="$HEXSTRIKE_API_TOKEN" \
+  -e HEXSTRIKE_SCOPE_FILE=/app/scope.json \
+  -e HEXSTRIKE_AUDIT_LOG=/tmp/hexstrike_files/audit.jsonl \
+  hexstrike-ai:latest
+```
+
+Tool output and the audit log both land in `./engagements/acme-corp/workspace` on the host — inspectable, and gone (well, archived, not scanning) as soon as you `docker rm` the container. `--cap-add=NET_RAW --cap-add=NET_ADMIN` is what lets `nmap`/`masscan` do raw-socket scans (SYN scans etc.) despite the container running as a non-root user — the image doesn't grant that capability container-wide, it's set directly on those two binaries via `setcap`.
+
+The `0.0.0.0` bind you'll see if you inspect the image is intentional and not a contradiction of the loopback-only default described above — Docker's network namespace means it's harmless in isolation; the `-p 127.0.0.1:8888:8888` mapping is what actually determines host-level exposure, and that's loopback-only here too.
 
 ---
 
 ## AI Client Integration Setup
 
+> Flags `--health-timeout 15` and `--lazy` (new in v6.0.1) fix the old
+> MCP *"Connection closed"* bug: the client used a 5s `/health` probe plus
+> blocking retries at startup, so slow machines got killed by the MCP host.
+> Always start `hexstrike_server.py` **before** the AI client, or keep `--lazy`.
+
+### OpenCode (auto-configured by installer)
+
+`./install.sh` already writes `~/.config/opencode/opencode.json` using the venv
+python — just restart OpenCode. Manual equivalent (`opencode.json.example` in repo):
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "hexstrike": {
+      "type": "local",
+      "command": [
+        "/absolute/path/to/hexstrike-ai-update/hexstrike-env/bin/python",
+        "/absolute/path/to/hexstrike-ai-update/hexstrike_mcp.py",
+        "--server",
+        "http://localhost:8888",
+        "--health-timeout",
+        "15",
+        "--lazy"
+      ],
+      "enabled": true
+    }
+  }
+}
+```
+
 ### Claude Desktop Integration or Cursor
 
-Edit `~/.config/Claude/claude_desktop_config.json`:
+Edit `~/.config/Claude/claude_desktop_config.json` (same shape works for Cursor —
+see `hexstrike-ai-mcp.json` in the repo):
 ```json
 {
   "mcpServers": {
     "hexstrike-ai": {
-      "command": "python3",
+      "command": "/path/to/hexstrike-ai/hexstrike-env/bin/python3",
+      "command": "/absolute/path/to/hexstrike-ai-update/hexstrike-env/bin/python",
       "args": [
-        "/path/to/hexstrike-ai/hexstrike_mcp.py",
+        "/absolute/path/to/hexstrike-ai-update/hexstrike_mcp.py",
         "--server",
-        "http://localhost:8888"
+        "http://localhost:8888",
+        "--health-timeout",
+        "15",
+        "--lazy"
       ],
-      "description": "HexStrike AI v6.0 - Advanced Cybersecurity Automation Platform",
+      "description": "HexStrike AI v6.0.1 - Advanced Cybersecurity Automation Platform",
       "timeout": 300,
       "disabled": false
     }
   }
 }
 ```
+
+> Prefer the venv python (`hexstrike-env/bin/python`) over system `python3` so the
+> MCP client always finds the pinned `mcp<2` SDK. Remove `--lazy` only if the
+> server is guaranteed to be running before the AI client starts.
 
 ### VS Code Copilot Integration
 
@@ -245,11 +489,14 @@ Configure VS Code settings in `.vscode/settings.json`:
   "servers": {
     "hexstrike": {
       "type": "stdio",
-      "command": "python3",
+      "command": "/absolute/path/to/hexstrike-ai-update/hexstrike-env/bin/python",
       "args": [
-        "/path/to/hexstrike-ai/hexstrike_mcp.py",
+        "/absolute/path/to/hexstrike-ai-update/hexstrike_mcp.py",
         "--server",
-        "http://localhost:8888"
+        "http://localhost:8888",
+        "--health-timeout",
+        "15",
+        "--lazy"
       ]
     }
   },
@@ -257,6 +504,46 @@ Configure VS Code settings in `.vscode/settings.json`:
 }
 ```
 
+### Alibaba Qwen Code Integration
+
+Configure Qwen Code settings in `.qwen/settings.json`:
+```json
+{
+  "mcpServers": {
+    "hexstrike": {
+      "command": "python3",
+      "args": [
+        "/path/to/hexstrike-ai/hexstrike_mcp.py"
+      ],
+      "cwd": "/path/to/your/workdir",
+      "env": {
+        "HEXSTRIKE_HOST": "127.0.0.1",
+        "HEXSTRIKE_PORT": "8888"
+      }
+    }
+  }
+}
+```
+### Autohand Code Integration
+
+With `hexstrike_server.py` running, add the local MCP bridge from the command line:
+
+```bash
+autohand mcp add hexstrike-ai python3 /absolute/path/to/hexstrike-ai/hexstrike_mcp.py --server http://localhost:8888
+```
+
+Add `--scope project` after `add` to keep the server configuration in the current project. See [Autohand Code](https://github.com/autohandai/code-cli/) for current installation and CLI details.
+
+### VS Code ChatGPT Codex Integration
+Configure Codex settings in `~/.codex/config.toml`
+```yaml
+[mcp_servers.hexstrike-ai]
+command = "python3"
+args = ["-X","utf8",
+  "/path/to/hexstrike-ai/hexstrike_mcp.py",
+  "--server","http://127.0.0.1:8888"
+]
+```
 ---
 
 ## Features
@@ -507,6 +794,7 @@ Configure VS Code settings in `.vscode/settings.json`:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Server health check with tool availability |
+| `/ping` | GET | Lightweight liveness check (no tool sweep, instant) |
 | `/api/command` | POST | Execute arbitrary commands with caching |
 | `/api/telemetry` | GET | System performance metrics |
 | `/api/cache/stats` | GET | Cache performance statistics |
@@ -606,28 +894,56 @@ AI Agent: "Thank you for clarifying ownership and intent. To proceed with a pene
 
 ### Common Issues
 
-1. **MCP Connection Failed**:
+1. **MCP Connection Failed / "Connection closed"** (fixed in v6.0.1):
    ```bash
+   # The old client probed /health with 5s timeout + blocking retries,
+   # so MCP hosts killed it on slow machines. Make sure you use:
+   #   --health-timeout 15 --lazy
+   # in your MCP config (installer writes this automatically).
+
    # Check if server is running
-   netstat -tlnp | grep 8888
-   
-   # Restart server
+   curl -s http://localhost:8888/health | head -c 200; echo
+   ss -tlnp | grep 8888
+
+   # Restart server (from the venv!)
+   source hexstrike-env/bin/activate
    python3 hexstrike_server.py
    ```
 
-2. **Security Tools Not Found**:
+2. **Security Tools Not Found / Wrong Coverage**:
    ```bash
-   # Check tool availability
-   which nmap gobuster nuclei
-   
-   # Install missing tools from their official sources
+   # Since v6.0.1 /health uses fast alias-aware detection
+   # (handles renames like crackmapexec->nxc, theHarvester case, msfconsole, ...).
+   # Re-scan and install only what's missing:
+   ./install.sh --categories "network web exploit password" --yes
+
+   # Inspect exactly what the server sees per tool:
+   curl -s http://localhost:8888/health | python3 -m json.tool | grep -A3 tools_detail | head -n 20
    ```
 
 3. **AI Agent Cannot Connect**:
    ```bash
-   # Verify MCP configuration paths
+   # Verify MCP configuration paths (use absolute venv python path!)
    # Check server logs for connection attempts
-   python3 hexstrike_mcp.py --debug
+   ./hexstrike-env/bin/python hexstrike_mcp.py --server http://localhost:8888 --lazy --debug
+   ```
+
+4. **`pip install` Fails (pwntools / angr / mitmproxy / selenium)**:
+   ```bash
+   # These are OPTIONAL since v6.0.1 and often fail to build on Python 3.13+.
+   # Core install (requirements.txt) excludes them — only add what you need:
+   python3 --version   # want 3.10-3.12 for extras
+   pip install -r requirements-optional.txt
+   # Server endpoints needing them return a clean JSON error when absent,
+   # instead of crashing at import (fixed).
+   ```
+
+5. **Wrong `mcp` SDK (`No module named 'mcp.server.fastmcp'`)**:
+   ```bash
+   # Code targets the MCP v1 API. Do NOT install mcp>=2 or the standalone
+   # `fastmcp` package for the default path:
+   ./hexstrike-env/bin/pip install "mcp>=1.9.0,<2.0.0"
+   # hexstrike_mcp.py also has a compat shim (v1 -> v2 MCPServer -> fastmcp pkg).
    ```
 
 ### Debug Mode
@@ -647,7 +963,20 @@ python3 hexstrike_mcp.py --debug
 - Run in isolated environments or dedicated security testing VMs
 - AI agents can execute arbitrary security tools - ensure proper oversight
 - Monitor AI agent activities through the real-time dashboard
-- Consider implementing authentication for production deployments
+
+### Built-in Hardening
+
+The server ships with the following on by default or available via env vars — set these up before pointing this at anything real:
+
+| Control | Env Var | Default | Notes |
+|---|---|---|---|
+| Bind address | `HEXSTRIKE_HOST` / `--host` | `127.0.0.1` | Server **refuses to run open on `0.0.0.0`** unless you explicitly pass a different `--host`. Loopback-only by default. |
+| Shared-secret auth | `HEXSTRIKE_API_TOKEN` | **required** | Server exits at startup if unset — it will not run unauthenticated. Every route (including `/health`, `/ping`) requires header `X-HexStrike-Token: <token>`. Generate with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+| Liveness check | — | `/ping` | Lightweight, instant. `/health` does a full ~30s tool-availability sweep — use `/ping` for polling/monitoring, `/health` for diagnostics. |
+| Engagement scope | `HEXSTRIKE_SCOPE_FILE` | off (opt-in) | Points to a JSON file (`{"domains": [...], "networks": ["CIDR", ...]}` — see `scope.example.json`) allowlisting authorized targets. Requests referencing an out-of-scope host — via structured params **or** parsed out of a raw command string — get `403`. Set this per engagement; it is the single most important control if you're running this against client-owned infrastructure. |
+| Audit log | `HEXSTRIKE_AUDIT_LOG` | `hexstrike_audit.jsonl` | JSONL, one line per authenticated request: timestamp, source IP, method, path, extracted targets, response status. Keep it for engagement records. |
+
+None of this replaces running the server on isolated infrastructure — it reduces the blast radius of the server being reachable or misused, it doesn't sandbox the 150+ tools it invokes.
 
 ### Legal & Ethical Use
 
@@ -692,6 +1021,54 @@ python3 hexstrike_server.py --port 8888 --debug
 - **⚡ Performance Optimizations** - Caching improvements and scalability enhancements
 - **📖 Documentation** - AI usage examples and integration guides
 - **🧪 Testing Frameworks** - Automated testing for AI agent interactions
+
+---
+
+## Community Documentation
+
+A community-maintained, hands-on guide covering HexStrike AI installation, LLM integrations, authorized lab workflows, and end-to-end assessment examples.
+
+📖 **[HexStrike AI Lab Guide](https://1200km.com/Hexstrike-AI-guide/)** · [Source](https://github.com/anpa1200/Hexstrike-AI-guide) · maintained by [@anpa1200](https://github.com/anpa1200)
+
+### Getting Started
+
+- [Overview and architecture](https://1200km.com/Hexstrike-AI-guide/docs/getting-started/overview)
+- [Installation on Kali Linux](https://1200km.com/Hexstrike-AI-guide/docs/getting-started/installation)
+- [HexStrike AI compared with other AI security tools](https://1200km.com/Hexstrike-AI-guide/docs/getting-started/vs-other-tools)
+
+### LLM and MCP Integrations
+
+- [Integration overview](https://1200km.com/Hexstrike-AI-guide/docs/llm-integrations/overview)
+- [Gemini CLI](https://1200km.com/Hexstrike-AI-guide/docs/llm-integrations/gemini)
+- [OpenAI Codex](https://1200km.com/Hexstrike-AI-guide/docs/llm-integrations/openai-codex)
+- [Cursor MCP](https://1200km.com/Hexstrike-AI-guide/docs/llm-integrations/cursor-mcp)
+- [Local Ollama orchestration](https://1200km.com/Hexstrike-AI-guide/docs/llm-integrations/ollama-local)
+
+### Reconnaissance and Authorized Attack Labs
+
+- [Shodan reconnaissance](https://1200km.com/Hexstrike-AI-guide/docs/recon-osint/shodan)
+- [Email OSINT and exposure mapping](https://1200km.com/Hexstrike-AI-guide/docs/recon-osint/email-osint)
+- [Network discovery](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/network-discovery)
+- [Web application testing](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/web-application)
+- [Wireless and Wi-Fi testing](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/wireless-wifi)
+- [SSH credential auditing](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/ssh-brute-force)
+- [SMB credential auditing](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/smb-brute-force)
+- [Active Directory assessment](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/active-directory)
+- [AD CS ESC8 lab](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/adcs-esc8)
+- [Web and cloud assessment](https://1200km.com/Hexstrike-AI-guide/docs/attack-techniques/web-cloud)
+
+### Password Recovery and Full Walkthroughs
+
+- [Modern password recovery](https://1200km.com/Hexstrike-AI-guide/docs/password-recovery/modern-cracking)
+- [ZIP recovery](https://1200km.com/Hexstrike-AI-guide/docs/password-recovery/zip)
+- [PDF recovery](https://1200km.com/Hexstrike-AI-guide/docs/password-recovery/pdf)
+- [Office document recovery](https://1200km.com/Hexstrike-AI-guide/docs/password-recovery/office-documents)
+- [Full penetration-testing methodology](https://1200km.com/Hexstrike-AI-guide/docs/full-pt-walkthroughs/full-pt-guide)
+- [Isolated vulnerable lab setup](https://1200km.com/Hexstrike-AI-guide/docs/full-pt-walkthroughs/lab-setup)
+- [Full-subnet assessment walkthrough](https://1200km.com/Hexstrike-AI-guide/docs/full-pt-walkthroughs/full-subnet)
+- [Black-box Active Directory walkthrough](https://1200km.com/Hexstrike-AI-guide/docs/full-pt-walkthroughs/black-box-ad)
+
+> All walkthroughs are documented for isolated labs and explicitly authorized security assessments.
 
 ---
 
@@ -755,7 +1132,7 @@ MIT License - see LICENSE file for details.
 
 ## 🌟 **Star History**
 
-[![Star History Chart](https://api.star-history.com/svg?repos=0x4m4/hexstrike-ai&type=Date)](https://star-history.com/#0x4m4/hexstrike-ai&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=0x4m4/hexstrike-ai&type=Date)](https://star-history.dera.page/#0x4m4/hexstrike-ai&Date)
 
 ### **📊 Project Statistics**
 

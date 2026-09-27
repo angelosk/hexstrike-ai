@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# hexstrike_server.py
 """
 HexStrike AI - Advanced Penetration Testing Framework Server
 
@@ -19,9 +20,13 @@ Framework: FastMCP integration for AI agent communication
 """
 
 import argparse
+import hmac
+import ipaddress
 import json
 import logging
 import os
+import tempfile
+import shlex
 import subprocess
 import sys
 import traceback
@@ -31,6 +36,7 @@ import hashlib
 import pickle
 import base64
 import queue
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
@@ -44,6 +50,7 @@ import psutil
 import signal
 import requests
 import re
+import shlex
 import socket
 import urllib.parse
 from dataclasses import dataclass, field
@@ -53,17 +60,69 @@ import asyncio
 import aiohttp
 from urllib.parse import urljoin, urlparse, parse_qs
 from bs4 import BeautifulSoup
-import selenium
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
-import mitmproxy
-from mitmproxy import http as mitmhttp
-from mitmproxy.tools.dump import DumpMaster
-from mitmproxy.options import Options as MitmOptions
+# Optional feature deps (fixed v6.0.1): selenium/mitmproxy moved to
+# requirements-optional.txt so core install never breaks. Endpoints that
+# need them return a clean JSON error when missing instead of crashing import.
+try:
+    import selenium
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    selenium = None
+    webdriver = None
+    Options = None
+    By = None
+    WebDriverWait = None
+    EC = None
+    TimeoutException = Exception
+    WebDriverException = Exception
+    SELENIUM_AVAILABLE = False
+
+try:
+    import mitmproxy
+    from mitmproxy import http as mitmhttp
+    from mitmproxy.tools.dump import DumpMaster
+    from mitmproxy.options import Options as MitmOptions
+    MITMPROXY_AVAILABLE = True
+except ImportError:
+    mitmproxy = None
+    mitmhttp = None
+    DumpMaster = None
+    MitmOptions = None
+    MITMPROXY_AVAILABLE = False
+
+# ============================================================================
+# SHELL ARGUMENT SANITIZATION
+# ============================================================================
+
+
+def safe_additional_args(value):
+    """Quote each whitespace-separated token of a client-supplied
+    'additional_args'-style parameter before it is concatenated into a
+    shell=True command string.
+
+    These endpoints let a caller pass a string of extra CLI flags (e.g.
+    "-T4 -Pn") that is appended to the command unquoted. Splitting into
+    tokens with shlex.split() and quoting each with shlex.quote()
+    preserves the intended one-argument-per-token semantics while making
+    it impossible for any token to break out of the tool invocation
+    (";", "|", "$()", backticks, etc. are all neutralized once quoted).
+    """
+    if not value:
+        return value
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        # Unbalanced quotes: treat the whole string as one opaque token
+        # rather than passing it through unsanitized.
+        tokens = [value]
+    return " ".join(shlex.quote(tok) for tok in tokens)
+
 
 # ============================================================================
 # LOGGING CONFIGURATION (MUST BE FIRST)
@@ -93,6 +152,184 @@ logger = logging.getLogger(__name__)
 # Flask app configuration
 app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
+
+# ── Shared-secret auth gate ─────────────────────────────────────────────
+# HexStrike executes arbitrary commands/code on this host (/api/command,
+# /api/python/execute, etc). This tool is for authorized penetration
+# testing / ethical hacking use only — it must never accept requests it
+# can't authenticate, so the server refuses to start without a token
+# rather than silently running open.
+HEXSTRIKE_API_TOKEN = os.environ.get("HEXSTRIKE_API_TOKEN")
+if not HEXSTRIKE_API_TOKEN:
+    print("FATAL: HEXSTRIKE_API_TOKEN is not set. Refusing to start unauthenticated.")
+    print("Set it in your shell env (e.g. ~/.zshrc_secrets) before running this server.")
+    sys.exit(1)
+
+@app.before_request
+def _require_hexstrike_token():
+    supplied = request.headers.get("X-HexStrike-Token", "")
+    if not hmac.compare_digest(supplied, HEXSTRIKE_API_TOKEN):
+        return jsonify({"error": "unauthorized"}), 401
+
+# ── Engagement scope enforcement ────────────────────────────────────────
+# This tool is for authorized penetration testing / ethical hacking only.
+# Without a scope check, an AI agent chaining tool calls (or content it
+# scraped that contains injected instructions) can drift a target outside
+# the client's written authorization — that's the #1 real-world liability
+# risk for a solo pentester, not a code bug. Enforcement is opt-in via
+# HEXSTRIKE_SCOPE_FILE so existing labs/CTF use isn't broken by default,
+# but any real client engagement should set it.
+HEXSTRIKE_SCOPE_FILE = os.environ.get("HEXSTRIKE_SCOPE_FILE")
+_SCOPE_DOMAINS = set()
+_SCOPE_NETWORKS = []
+
+# Absolute path to ProjectDiscovery's Go httpx binary. The image also has
+# pip's httpx[cli] package on PATH ahead of /opt/go/bin (same command name,
+# unrelated tool — an HTTP client CLI, not a recon scanner), so a bare
+# "httpx" call silently runs the wrong binary. Overridable via env for
+# non-default image layouts.
+HEXSTRIKE_HTTPX_BIN = os.environ.get("HEXSTRIKE_HTTPX_BIN", "/opt/go/bin/httpx")
+
+# Deterministic bound (minutes) for amass enum. Kept comfortably under the
+# 300s generic command-timeout so amass exits on its own with whatever
+# results it has, rather than getting SIGKILLed mid-write by the wrapper.
+HEXSTRIKE_AMASS_TIMEOUT_MIN = int(os.environ.get("HEXSTRIKE_AMASS_TIMEOUT_MIN", "4"))
+
+def _load_scope():
+    global _SCOPE_DOMAINS, _SCOPE_NETWORKS
+    if not HEXSTRIKE_SCOPE_FILE:
+        return
+    try:
+        with open(HEXSTRIKE_SCOPE_FILE) as f:
+            scope = json.load(f)
+        _SCOPE_DOMAINS = {d.lower().lstrip("*.") for d in scope.get("domains", [])}
+        _SCOPE_NETWORKS = [ipaddress.ip_network(n, strict=False) for n in scope.get("networks", [])]
+        logger.info(f"🎯 Scope loaded: {len(_SCOPE_DOMAINS)} domain(s), {len(_SCOPE_NETWORKS)} network(s) from {HEXSTRIKE_SCOPE_FILE}")
+    except Exception as e:
+        logger.error(f"💥 Failed to load scope file {HEXSTRIKE_SCOPE_FILE}: {e}")
+        raise
+
+_load_scope()
+
+_TARGET_KEYS = ("target", "host", "domain", "ip", "url", "rhost", "hostname")
+
+# ── Command-string target extraction ────────────────────────────────────
+# /api/command (and similar free-text endpoints) takes a raw shell string,
+# not structured params — "nmap bank.com" never populates a "target" key,
+# so the JSON-key scope check above can't see it. This is a heuristic
+# second pass over the command text itself. Deliberately conservative:
+# only domains ending in a known real TLD are treated as targets, so
+# ordinary filenames/flags in the command (results.txt, wordlist.txt,
+# nuclei-templates.yaml, config.ini) don't get misread as out-of-scope
+# hosts. It will miss obfuscated/encoded targets — it's a safety net for
+# the common case, not a guarantee.
+_KNOWN_TLDS = frozenset("""
+com net org io co gov edu mil info biz ai dev app xyz online site tech
+cloud shop store live us uk ca au de fr jp cn in br nl ru es it ch se no
+fi dk pl be at nz sg hk kr mx za me tv
+""".split())
+_CMD_DOMAIN_RE = re.compile(r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b")
+_CMD_IPV4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|1?\d{1,2})\b")
+
+def _extract_command_targets(command):
+    if not isinstance(command, str) or not command.strip():
+        return []
+    found = set()
+    for match in _CMD_DOMAIN_RE.findall(command):
+        tld = match.rsplit(".", 1)[-1].lower()
+        if tld in _KNOWN_TLDS:
+            found.add(match.lower())
+    for m in _CMD_IPV4_RE.finditer(command):
+        found.add(m.group(0))
+    return list(found)
+
+def _extract_targets(payload):
+    if not isinstance(payload, dict):
+        return []
+    found = []
+    for key in _TARGET_KEYS:
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            # Batch tools (httpx, dnsx, etc.) accept comma-separated hosts
+            # in a single target/host field. Splitting here so each host is
+            # scope-checked individually — an unsplit CSV string never
+            # matches a single-domain scope entry and the whole request
+            # gets falsely blocked as out-of-scope.
+            found.extend(p.strip() for p in val.split(",") if p.strip())
+    # Scan EVERY string field, not just "command" — endpoints vary in what
+    # they call their free-text field (command, script, code, payload,
+    # query, ...). Found in the wild: /api/python/execute uses "script",
+    # which wasn't covered by a command-only check and let arbitrary
+    # Python (making its own HTTP requests to any target) bypass scope
+    # enforcement entirely. Scanning every string value closes that gap
+    # and any similarly-shaped endpoint we haven't specifically audited.
+    for key, val in payload.items():
+        if isinstance(val, str) and val.strip():
+            found.extend(_extract_command_targets(val))
+    return list(dict.fromkeys(found))  # dedup, preserve order
+
+def _host_of(value):
+    v = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", value)  # strip scheme
+    v = v.split("/")[0].split("?")[0].split(":")[0]         # strip path/query/port
+    return v.lower()
+
+def _in_scope(value):
+    host = _host_of(value)
+    try:
+        ip = ipaddress.ip_address(host)
+        return any(ip in net for net in _SCOPE_NETWORKS)
+    except ValueError:
+        pass
+    return host in _SCOPE_DOMAINS or any(host.endswith("." + d) for d in _SCOPE_DOMAINS)
+
+@app.before_request
+def _enforce_scope():
+    if not HEXSTRIKE_SCOPE_FILE or not (_SCOPE_DOMAINS or _SCOPE_NETWORKS):
+        return  # scope enforcement not configured — opt-in, no-op by default
+    if request.path in ("/health", "/ping"):
+        return
+    payload = request.get_json(silent=True) or {}
+    targets = _extract_targets(payload)
+    out_of_scope = [t for t in targets if not _in_scope(t)]
+    if out_of_scope:
+        logger.warning(f"🚫 OUT-OF-SCOPE request blocked: {request.path} targets={out_of_scope}")
+        return jsonify({"error": "out_of_scope", "targets": out_of_scope}), 403
+
+# ── Audit log ────────────────────────────────────────────────────────────
+# Immutable-ish JSONL trail of every authenticated request: what ran,
+# against what, when. Needed for client deliverables and chain of custody,
+# not optional for a real engagement.
+_audit_logger = logging.getLogger("hexstrike.audit")
+_audit_logger.setLevel(logging.INFO)
+_audit_handler = logging.FileHandler(os.environ.get("HEXSTRIKE_AUDIT_LOG", "hexstrike_audit.jsonl"))
+_audit_handler.setFormatter(logging.Formatter("%(message)s"))
+_audit_logger.addHandler(_audit_handler)
+_audit_logger.propagate = False
+
+@app.after_request
+def _audit_log(response):
+    if request.path not in ("/health", "/ping"):
+        payload = request.get_json(silent=True) or {}
+        response_snippet = None
+        try:
+            if not response.direct_passthrough:
+                response_snippet = response.get_data(as_text=True)[:2000]
+        except Exception:
+            response_snippet = "<unreadable/binary response>"
+        _audit_logger.info(json.dumps({
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "remote_addr": request.remote_addr,
+            "method": request.method,
+            "path": request.path,
+            "targets": _extract_targets(payload),
+            "command": payload.get("command") if isinstance(payload, dict) else None,
+            "params": {k: v for k, v in payload.items() if k != "command"} if isinstance(payload, dict) else None,
+            "status": response.status_code,
+            "response_snippet": response_snippet,
+        }))
+    return response
+
+_SERVER_START_TIME = time.time()
 
 # API Configuration
 API_PORT = int(os.environ.get('HEXSTRIKE_PORT', 8888))
@@ -438,6 +675,33 @@ class ModernVisualEngine:
 
         return f"{color}▶ {command[:60]}{'...' if len(command) > 60 else ''} | {status.upper()}{duration_text}{ModernVisualEngine.COLORS['RESET']}"
 
+    @staticmethod
+    def create_summary_report(results: Dict[str, Any]) -> str:
+        """Generate a beautiful summary report"""
+
+        total_vulns = len(results.get('vulnerabilities', []))
+        critical_vulns = len([v for v in results.get('vulnerabilities', []) if v.get('severity') == 'critical'])
+        high_vulns = len([v for v in results.get('vulnerabilities', []) if v.get('severity') == 'high'])
+        execution_time = results.get('execution_time', 0)
+        tools_used = results.get('tools_used', [])
+
+        report = f"""
+{ModernVisualEngine.COLORS['MATRIX_GREEN']}{ModernVisualEngine.COLORS['BOLD']}╔══════════════════════════════════════════════════════════════════════════════╗
+║                              📊 SCAN SUMMARY REPORT                          ║
+╠══════════════════════════════════════════════════════════════════════════════╣{ModernVisualEngine.COLORS['RESET']}
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['NEON_BLUE']}🎯 Target:{ModernVisualEngine.COLORS['RESET']} {results.get('target', 'Unknown')[:60]}
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['CYBER_ORANGE']}⏱️  Duration:{ModernVisualEngine.COLORS['RESET']} {execution_time:.2f} seconds
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['WARNING']}🛠️  Tools Used:{ModernVisualEngine.COLORS['RESET']} {len(tools_used)} tools
+{ModernVisualEngine.COLORS['BOLD']}╠──────────────────────────────────────────────────────────────────────────────╣{ModernVisualEngine.COLORS['RESET']}
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['HACKER_RED']}🔥 Critical:{ModernVisualEngine.COLORS['RESET']} {critical_vulns} vulnerabilities
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['ERROR']}⚠️  High:{ModernVisualEngine.COLORS['RESET']} {high_vulns} vulnerabilities
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['MATRIX_GREEN']}📈 Total Found:{ModernVisualEngine.COLORS['RESET']} {total_vulns} vulnerabilities
+{ModernVisualEngine.COLORS['BOLD']}╠──────────────────────────────────────────────────────────────────────────────╣{ModernVisualEngine.COLORS['RESET']}
+{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['ELECTRIC_PURPLE']}🚀 Tools:{ModernVisualEngine.COLORS['RESET']} {', '.join(tools_used[:5])}{'...' if len(tools_used) > 5 else ''}
+{ModernVisualEngine.COLORS['MATRIX_GREEN']}{ModernVisualEngine.COLORS['BOLD']}╚══════════════════════════════════════════════════════════════════════════════╝{ModernVisualEngine.COLORS['RESET']}
+"""
+        return report
+
 # ============================================================================
 # INTELLIGENT DECISION ENGINE (v6.0 ENHANCEMENT)
 # ============================================================================
@@ -711,7 +975,7 @@ class IntelligentDecisionEngine:
             "api_testing": [
                 {"tool": "httpx", "priority": 1, "params": {"probe": True, "tech_detect": True}},
                 {"tool": "arjun", "priority": 2, "params": {"method": "GET,POST", "stable": True}},
-                {"tool": "x8", "priority": 3, "params": {"method": "GET", "wordlist": "/usr/share/wordlists/x8/params.txt"}},
+                {"tool": "x8", "priority": 3, "params": {"method": "GET", "wordlist": "./wordlists/x8/params.txt"}},
                 {"tool": "paramspider", "priority": 4, "params": {"level": 2}},
                 {"tool": "nuclei", "priority": 5, "params": {"tags": "api,graphql,jwt", "severity": "high,critical"}},
                 {"tool": "ffuf", "priority": 6, "params": {"mode": "parameter", "method": "POST"}}
@@ -844,12 +1108,12 @@ class IntelligentDecisionEngine:
                 return TargetType.API_ENDPOINT
             return TargetType.WEB_APPLICATION
 
-        # IP address pattern
-        if re.match(r'^(\d{1,3}\.){3}\d{1,3}$', target):
+        # IP address pattern (port optional)
+        if re.match(r'^(\d{1,3}\.){3}\d{1,3}(:\d{1,5})?$', target):
             return TargetType.NETWORK_HOST
 
-        # Domain name pattern
-        if re.match(r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', target):
+        # Domain name pattern (port optional)
+        if re.match(r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(:\d{1,5})?$', target):
             return TargetType.WEB_APPLICATION
 
         # File patterns
@@ -3499,9 +3763,9 @@ class CTFToolManager:
             "katana": "katana -depth 3 -js-crawl -form-extraction -headless",
             "sqlmap": "sqlmap --batch --level 3 --risk 2 --threads 5",
             "dalfox": "dalfox url --mining-dom --mining-dict --deep-domxss",
-            "gobuster": "gobuster dir -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x php,html,txt,js",
+            "gobuster": "gobuster dir -w ./wordlists/dirbuster/directory-list-2.3-medium.txt -x php,html,txt,js",
             "dirsearch": "dirsearch -u {} -e php,html,js,txt,xml,json -t 50",
-            "feroxbuster": "feroxbuster -u {} -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x php,html,js,txt",
+            "feroxbuster": "feroxbuster -u {} -w ./wordlists/dirbuster/directory-list-2.3-medium.txt -x php,html,js,txt",
             "arjun": "arjun -u {} --get --post",
             "paramspider": "paramspider -d {}",
             "wpscan": "wpscan --url {} --enumerate ap,at,cb,dbe",
@@ -3510,7 +3774,7 @@ class CTFToolManager:
 
             # Cryptography Challenge Tools
             "hashcat": "hashcat -m 0 -a 0 --potfile-disable --quiet",
-            "john": "john --wordlist=/usr/share/wordlists/rockyou.txt --format=Raw-MD5",
+            "john": "john --wordlist=./wordlists/rockyou.txt --format=Raw-MD5",
             "hash-identifier": "hash-identifier",
             "hashid": "hashid -m",
             "cipher-identifier": "python3 /opt/cipher-identifier/cipher_identifier.py",
@@ -3706,7 +3970,7 @@ class CTFToolManager:
         if tool in ["hashcat", "john"]:
             # For hash cracking, add common wordlists and rules
             if "wordlist" not in base_command:
-                base_command += " --wordlist=/usr/share/wordlists/rockyou.txt"
+                base_command += " --wordlist=./wordlists/rockyou.txt"
             if tool == "hashcat" and "--rules" not in base_command:
                 base_command += " --rules-file=/usr/share/hashcat/rules/best64.rule"
 
@@ -4752,7 +5016,7 @@ class ParameterOptimizer:
             base_params.update({
                 "mode": "dir",
                 "threads": 20,
-                "wordlist": "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt"
+                "wordlist": "./wordlists/dirbuster/directory-list-2.3-medium.txt"
             })
         elif tool == "sqlmap":
             base_params.update({
@@ -5705,9 +5969,11 @@ class ProcessManager:
 class PythonEnvironmentManager:
     """Manage Python virtual environments and dependencies"""
 
-    def __init__(self, base_dir: str = "/tmp/hexstrike_envs"):
+    def __init__(self, base_dir: str = None):
+        if base_dir is None:
+            base_dir = str(Path(tempfile.gettempdir()) / "hexstrike_envs")
         self.base_dir = Path(base_dir)
-        self.base_dir.mkdir(exist_ok=True)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def create_venv(self, env_name: str) -> Path:
         """Create a new virtual environment"""
@@ -5721,6 +5987,9 @@ class PythonEnvironmentManager:
         """Install a package in the specified environment"""
         env_path = self.create_venv(env_name)
         pip_path = env_path / "bin" / "pip"
+        if not pip_path.exists():
+            # Windows uses Scripts\pip.exe
+            pip_path = env_path / "Scripts" / "pip.exe"
 
         try:
             result = subprocess.run([str(pip_path), "install", package],
@@ -5738,7 +6007,11 @@ class PythonEnvironmentManager:
     def get_python_path(self, env_name: str) -> str:
         """Get Python executable path for environment"""
         env_path = self.create_venv(env_name)
-        return str(env_path / "bin" / "python")
+        python_path = env_path / "bin" / "python"
+        if not python_path.exists():
+            # Windows
+            python_path = env_path / "Scripts" / "python.exe"
+        return str(python_path)
 
 # Global environment manager
 env_manager = PythonEnvironmentManager()
@@ -5924,33 +6197,6 @@ class CVEIntelligenceManager:
         formatted_output += f"{ModernVisualEngine.COLORS['BOLD']}╰─────────────────────────────────────────────────────────────────────────────╯{ModernVisualEngine.COLORS['RESET']}"
 
         return formatted_output
-
-    @staticmethod
-    def create_summary_report(results: Dict[str, Any]) -> str:
-        """Generate a beautiful summary report"""
-
-        total_vulns = len(results.get('vulnerabilities', []))
-        critical_vulns = len([v for v in results.get('vulnerabilities', []) if v.get('severity') == 'critical'])
-        high_vulns = len([v for v in results.get('vulnerabilities', []) if v.get('severity') == 'high'])
-        execution_time = results.get('execution_time', 0)
-        tools_used = results.get('tools_used', [])
-
-        report = f"""
-{ModernVisualEngine.COLORS['MATRIX_GREEN']}{ModernVisualEngine.COLORS['BOLD']}╔══════════════════════════════════════════════════════════════════════════════╗
-║                              📊 SCAN SUMMARY REPORT                          ║
-╠══════════════════════════════════════════════════════════════════════════════╣{ModernVisualEngine.COLORS['RESET']}
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['NEON_BLUE']}🎯 Target:{ModernVisualEngine.COLORS['RESET']} {results.get('target', 'Unknown')[:60]}
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['CYBER_ORANGE']}⏱️  Duration:{ModernVisualEngine.COLORS['RESET']} {execution_time:.2f} seconds
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['WARNING']}🛠️  Tools Used:{ModernVisualEngine.COLORS['RESET']} {len(tools_used)} tools
-{ModernVisualEngine.COLORS['BOLD']}╠──────────────────────────────────────────────────────────────────────────────╣{ModernVisualEngine.COLORS['RESET']}
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['HACKER_RED']}🔥 Critical:{ModernVisualEngine.COLORS['RESET']} {critical_vulns} vulnerabilities
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['ERROR']}⚠️  High:{ModernVisualEngine.COLORS['RESET']} {high_vulns} vulnerabilities
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['MATRIX_GREEN']}📈 Total Found:{ModernVisualEngine.COLORS['RESET']} {total_vulns} vulnerabilities
-{ModernVisualEngine.COLORS['BOLD']}╠──────────────────────────────────────────────────────────────────────────────╣{ModernVisualEngine.COLORS['RESET']}
-{ModernVisualEngine.COLORS['BOLD']}║{ModernVisualEngine.COLORS['RESET']} {ModernVisualEngine.COLORS['ELECTRIC_PURPLE']}🚀 Tools:{ModernVisualEngine.COLORS['RESET']} {', '.join(tools_used[:5])}{'...' if len(tools_used) > 5 else ''}
-{ModernVisualEngine.COLORS['MATRIX_GREEN']}{ModernVisualEngine.COLORS['BOLD']}╚══════════════════════════════════════════════════════════════════════════════╝{ModernVisualEngine.COLORS['RESET']}
-"""
-        return report
 
     def fetch_latest_cves(self, hours=24, severity_filter="HIGH,CRITICAL"):
         """Fetch latest CVEs from NVD and other real sources"""
@@ -8633,13 +8879,14 @@ cve_intelligence = CVEIntelligenceManager()
 exploit_generator = AIExploitGenerator()
 vulnerability_correlator = VulnerabilityCorrelator()
 
-def execute_command(command: str, use_cache: bool = True) -> Dict[str, Any]:
+def execute_command(command: str, use_cache: bool = True, timeout: int = COMMAND_TIMEOUT) -> Dict[str, Any]:
     """
     Execute a shell command with enhanced features
 
     Args:
         command: The command to execute
         use_cache: Whether to use caching for this command
+        timeout: Maximum execution time in seconds for the command
 
     Returns:
         A dictionary containing the stdout, stderr, return code, and metadata
@@ -8651,8 +8898,8 @@ def execute_command(command: str, use_cache: bool = True) -> Dict[str, Any]:
         if cached_result:
             return cached_result
 
-    # Execute command
-    executor = EnhancedCommandExecutor(command)
+    # Execute command (propagate timeout to the executor)
+    executor = EnhancedCommandExecutor(command, timeout=timeout)
     result = executor.execute()
 
     # Cache successful results
@@ -8928,9 +9175,11 @@ def _determine_operation_type(tool_name: str) -> str:
 class FileOperationsManager:
     """Handle file operations with security and validation"""
 
-    def __init__(self, base_dir: str = "/tmp/hexstrike_files"):
+    def __init__(self, base_dir: str = None):
+        if base_dir is None:
+            base_dir = str(Path(tempfile.gettempdir()) / "hexstrike_files")
         self.base_dir = Path(base_dir)
-        self.base_dir.mkdir(exist_ok=True)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.max_file_size = 100 * 1024 * 1024  # 100MB
 
     def create_file(self, filename: str, content: str, binary: bool = False) -> Dict[str, Any]:
@@ -9020,9 +9269,119 @@ file_manager = FileOperationsManager()
 
 # API Routes
 
+@app.route("/ping", methods=["GET"])
+def ping():
+    """Lightweight liveness check — no tool detection, no subprocess calls.
+    Use this for hex-up startup polling and frequent status checks;
+    use /health when you actually need the full tool-availability sweep."""
+    return jsonify({
+        "status": "ok",
+        "version": "6.0.0",
+        "uptime_seconds": round(time.time() - _SERVER_START_TIME, 2)
+    })
+# ============================================================================
+# FAST TOOL DETECTION (fixed: no shell, no cache, alias-aware, PATH-aware)
+# ============================================================================
+# Binary aliases: logical tool name -> candidate executables (first hit wins).
+# Covers renames (crackmapexec->nxc), case variants (theHarvester), GUI tools
+# that have different CLI names, and python modules that have no binary.
+TOOL_BIN_ALIASES = {
+    "nxc": ["nxc", "crackmapexec", "netexec"],
+    "enum4linux-ng": ["enum4linux-ng"],
+    "enum4linux": ["enum4linux", "enum4linux.pl"],
+    "theharvester": ["theHarvester", "theharvester", "theharvester.py"],
+    "volatility3": ["vol", "volatility3", "vol.py"],
+    "volatility": ["volatility", "volatility_2.6"],
+    "metasploit": ["msfconsole"],
+    "exploit-db": ["searchsploit"],
+    "shodan-cli": ["shodan"],
+    "censys-cli": ["censys"],
+    "have-i-been-pwned": ["hibp", "have-i-been-pwned"],
+    "hash-identifier": ["hash-identifier", "hashidentifier"],
+    "evil-winrm": ["evil-winrm", "evil-winrm.rb"],
+    "checksec": ["checksec", "checksec.sh"],
+    "one-gadget": ["one_gadget", "one-gadget"],
+    "ropgadget": ["ROPgadget", "ropgadget"],
+    "pwntools": ["pwntools"],
+    "angr": ["angr"],
+    "libc-database": ["libc-database"],
+    "graphql-scanner": ["graphql-scanner", "graphqlmap"],
+    "jwt-analyzer": ["jwt-analyzer", "jwt_tool.py", "jwt-tool"],
+    "burpsuite": ["burpsuite", "burpsuitepro"],
+    "zaproxy": ["zaproxy", "zap", "zap.sh"],
+    "postman": ["postman", "newman"],
+    "autopsy": ["autopsy"],
+    "maltego": ["maltego"],
+    "responder": ["responder", "Responder.py"],
+}
+
+# Python-only packages (no CLI binary expected): check via importlib.
+PYTHON_MODULE_TOOLS = {
+    "pwntools": "pwn",
+    "angr": "angr",
+    "scout-suite": "scout",
+    "recon-ng": "reconng",
+}
+
+# Minimal apt install hints for missing tools (Debian/Kali/Ubuntu).
+TOOL_INSTALL_HINTS = {
+    "nmap": "sudo apt install nmap", "gobuster": "sudo apt install gobuster",
+    "dirb": "sudo apt install dirb", "nikto": "sudo apt install nikto",
+    "sqlmap": "sudo apt install sqlmap", "hydra": "sudo apt install hydra",
+    "john": "sudo apt install john", "hashcat": "sudo apt install hashcat",
+    "masscan": "sudo apt install masscan", "ffuf": "sudo apt install ffuf",
+    "feroxbuster": "sudo apt install feroxbuster", "nuclei": "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+    "subfinder": "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
+    "httpx": "go install github.com/projectdiscovery/httpx/cmd/httpx@latest",
+    "katana": "go install github.com/projectdiscovery/katana/cmd/katana@latest",
+    "dalfox": "go install github.com/hahwul/dalfox/v2@latest",
+}
+
+_EXTRA_BIN_DIRS = [
+    os.path.expanduser("~/.local/bin"), os.path.expanduser("~/go/bin"),
+    os.path.expanduser("~/.cargo/bin"), "/usr/local/go/bin",
+    "/snap/bin", "/opt/nuclei", "/opt/katana",
+]
+
+def _ensure_helper_path():
+    extra = [d for d in _EXTRA_BIN_DIRS if os.path.isdir(d) and d not in os.environ.get("PATH", "").split(os.pathsep)]
+    if extra:
+        os.environ["PATH"] = os.pathsep.join(extra + [os.environ.get("PATH", "")])
+
+def resolve_tool(tool: str):
+    """Fast alias-aware tool resolution. Returns (available, resolved_name_or_path)."""
+    _ensure_helper_path()
+    # 1. Python modules first (no binary expected)
+    if tool in PYTHON_MODULE_TOOLS:
+        mod = PYTHON_MODULE_TOOLS[tool]
+        try:
+            import importlib.util as _ilu
+            if _ilu.find_spec(mod) is not None:
+                return True, f"python-module:{mod}"
+        except Exception:
+            pass
+        # fall through to binary aliases as well (e.g. pwntools CLIs)
+    # 2. Binary candidates
+    candidates = TOOL_BIN_ALIASES.get(tool, [tool])
+    for cand in candidates:
+        path = shutil.which(cand)
+        if path:
+            return True, path
+    # 3. Special-case: pwntools/angr import check even if not in map
+    if tool in ("pwntools", "angr", "ropper", "one-gadget", "pwninit"):
+        try:
+            import importlib.util as _ilu
+            guess = {"pwntools": "pwn", "angr": "angr", "ropper": "ropper", "one-gadget": "one_gadget"}.get(tool, tool)
+            if _ilu.find_spec(guess) is not None:
+                return True, f"python-module:{guess}"
+        except Exception:
+            pass
+    return False, None
+
+
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint with comprehensive tool detection"""
+    """Health check endpoint with fast, accurate tool detection (fixed v6.0.1)"""
 
     essential_tools = [
         "nmap", "gobuster", "dirb", "nikto", "sqlmap", "hydra", "john", "hashcat"
@@ -9083,50 +9442,67 @@ def health_check():
     ]
 
     additional_tools = [
-        "smbmap", "volatility", "sleuthkit", "autopsy", "evil-winrm",
-        "paramspider", "airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng",
-        "msfvenom", "msfconsole", "graphql-scanner", "jwt-analyzer"
+        "smbmap", "sleuthkit", "evil-winrm",
+        "airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng",
+        "msfvenom", "msfconsole",
     ]
 
-    all_tools = (
+    # Deduplicate preserving order (old code counted paramspider/graphql/jwt twice)
+    all_tools = list(dict.fromkeys(
         essential_tools + network_tools + web_security_tools + vuln_scanning_tools +
         password_tools + binary_tools + forensics_tools + cloud_tools +
         osint_tools + exploitation_tools + api_tools + wireless_tools + additional_tools
-    )
+    ))
     tools_status = {}
+    tools_detail = {}
 
+    # Fast path: shutil.which + importlib, no subprocess, no cache poisoning.
     for tool in all_tools:
         try:
-            result = execute_command(f"which {tool}", use_cache=True)
-            tools_status[tool] = result["success"]
-        except:
+            available, resolved = resolve_tool(tool)
+            tools_status[tool] = bool(available)
+            tools_detail[tool] = {
+                "available": bool(available),
+                "resolved": resolved,
+                "candidates": TOOL_BIN_ALIASES.get(tool, [tool]),
+            }
+        except Exception:
             tools_status[tool] = False
+            tools_detail[tool] = {"available": False, "resolved": None, "candidates": [tool]}
 
-    all_essential_tools_available = all(tools_status[tool] for tool in essential_tools)
+    all_essential_tools_available = all(tools_status.get(t, False) for t in essential_tools)
+    missing_essential = [t for t in essential_tools if not tools_status.get(t, False)]
+
+    def _stat(lst):
+        return {"total": len(lst), "available": sum(1 for t in lst if tools_status.get(t, False))}
 
     category_stats = {
-        "essential": {"total": len(essential_tools), "available": sum(1 for tool in essential_tools if tools_status.get(tool, False))},
-        "network": {"total": len(network_tools), "available": sum(1 for tool in network_tools if tools_status.get(tool, False))},
-        "web_security": {"total": len(web_security_tools), "available": sum(1 for tool in web_security_tools if tools_status.get(tool, False))},
-        "vuln_scanning": {"total": len(vuln_scanning_tools), "available": sum(1 for tool in vuln_scanning_tools if tools_status.get(tool, False))},
-        "password": {"total": len(password_tools), "available": sum(1 for tool in password_tools if tools_status.get(tool, False))},
-        "binary": {"total": len(binary_tools), "available": sum(1 for tool in binary_tools if tools_status.get(tool, False))},
-        "forensics": {"total": len(forensics_tools), "available": sum(1 for tool in forensics_tools if tools_status.get(tool, False))},
-        "cloud": {"total": len(cloud_tools), "available": sum(1 for tool in cloud_tools if tools_status.get(tool, False))},
-        "osint": {"total": len(osint_tools), "available": sum(1 for tool in osint_tools if tools_status.get(tool, False))},
-        "exploitation": {"total": len(exploitation_tools), "available": sum(1 for tool in exploitation_tools if tools_status.get(tool, False))},
-        "api": {"total": len(api_tools), "available": sum(1 for tool in api_tools if tools_status.get(tool, False))},
-        "wireless": {"total": len(wireless_tools), "available": sum(1 for tool in wireless_tools if tools_status.get(tool, False))},
-        "additional": {"total": len(additional_tools), "available": sum(1 for tool in additional_tools if tools_status.get(tool, False))}
+        "essential": _stat(essential_tools),
+        "network": _stat(network_tools),
+        "web_security": _stat(web_security_tools),
+        "vuln_scanning": _stat(vuln_scanning_tools),
+        "password": _stat(password_tools),
+        "binary": _stat(binary_tools),
+        "forensics": _stat(forensics_tools),
+        "cloud": _stat(cloud_tools),
+        "osint": _stat(osint_tools),
+        "exploitation": _stat(exploitation_tools),
+        "api": _stat(api_tools),
+        "wireless": _stat(wireless_tools),
+        "additional": _stat(additional_tools),
     }
 
     return jsonify({
         "status": "healthy",
         "message": "HexStrike AI Tools API Server is operational",
-        "version": "6.0.0",
+        "version": "6.0.1",
+        "detection": "shutil.which+importlib (fast, alias-aware)",
         "tools_status": tools_status,
+        "tools_detail": tools_detail,
         "all_essential_tools_available": all_essential_tools_available,
-        "total_tools_available": sum(1 for tool, available in tools_status.items() if available),
+        "missing_essential_tools": missing_essential,
+        "install_hints": {t: TOOL_INSTALL_HINTS.get(t, f"which {t} not found; see README Install Security Tools") for t in missing_essential},
+        "total_tools_available": sum(1 for v in tools_status.values() if v),
         "total_tools_count": len(all_tools),
         "category_stats": category_stats,
         "cache_stats": cache.get_stats(),
@@ -9773,7 +10149,8 @@ def intelligent_smart_scan():
                 }
 
         # Execute tools in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=min(len(selected_tools), 5)) as executor:
+        workers = max(1, min(len(selected_tools), 5))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             # Submit all tool executions
             future_to_tool = {
                 executor.submit(execute_single_tool, tool, target, profile): tool
@@ -9822,35 +10199,76 @@ def intelligent_smart_scan():
         return jsonify({"error": f"Server error: {str(e)}", "success": False}), 500
 
 # Helper functions for intelligent smart scan tool execution
-def execute_nmap_scan(target, params):
-    """Execute nmap scan with optimized parameters"""
+def execute_nmap_scan(target: str, params: dict):
+    """
+    Execute nmap with safe target cleanup.
+    - If `target` is a URL, pass to nmap only host[:port]
+      (e.g. http://127.0.0.1:3000 -> host=127.0.0.1, port=3000).
+    - If a port is present, prepend it to user-provided `ports`.
+    - No imports added; relies on existing `re` and `execute_command`.
+    """
     try:
         scan_type = params.get('scan_type', '-sV')
         ports = params.get('ports', '')
-        additional_args = params.get('additional_args', '')
-
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         # Build nmap command
         cmd_parts = ['nmap', scan_type]
         if ports:
             cmd_parts.extend(['-p', ports])
         if additional_args:
             cmd_parts.extend(additional_args.split())
-        cmd_parts.append(target)
+        cmd_parts.append(host)
 
-        return execute_command(' '.join(cmd_parts))
+        return execute_command(" ".join(cmd_parts))
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+def _auto_handle_gobuster_wildcard(url: str, mode: str, additional_args: str) -> Tuple[str, Optional[str]]:
+    """Ensure gobuster handles wildcard responses from targets like Juice Shop."""
+    additional_args = (additional_args or "").strip()
+
+    # Only dir mode needs 200-everywhere mitigation
+    if mode != "dir" or not url:
+        return additional_args, None
+
+    # Respect explicit user handling
+    wildcard_keywords = ["--wildcard", "--exclude-length", "--exclude-status", "-b", "--status-codes"]
+    if any(keyword in additional_args for keyword in wildcard_keywords):
+        return additional_args, None
+
+    candidate_flag: Optional[str] = None
+
+    try:
+        random_path = uuid.uuid4().hex[:12]
+        normalized = url if url.endswith('/') else f"{url}/"
+        probe_url = urllib.parse.urljoin(normalized, random_path)
+        response = requests.get(probe_url, timeout=5, verify=False)
+
+        # If the target reflects wildcard successes, reuse that body length
+        if response.status_code < 500 and response.content:
+            candidate_flag = f"--exclude-length {len(response.content)}"
+    except Exception as exc:
+        logger.debug(f"Gobuster wildcard probe failed ({exc}); falling back to --wildcard")
+
+    if not candidate_flag:
+        candidate_flag = "--wildcard"
+
+    adjusted_args = f"{additional_args} {candidate_flag}".strip()
+    return adjusted_args, candidate_flag
+
 
 def execute_gobuster_scan(target, params):
     """Execute gobuster scan with optimized parameters"""
     try:
         mode = params.get('mode', 'dir')
         wordlist = params.get('wordlist', '/usr/share/wordlists/dirb/common.txt')
-        additional_args = params.get('additional_args', '')
-
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['gobuster', mode, '-u', target, '-w', wordlist]
-        if additional_args:
-            cmd_parts.extend(additional_args.split())
+        if adjusted_args:
+            cmd_parts.extend(adjusted_args.split())
+
+        if auto_flag:
+            logger.info(f"🧪 Auto-adjusted Gobuster args with {auto_flag}")
 
         return execute_command(' '.join(cmd_parts))
     except Exception as e:
@@ -9861,8 +10279,7 @@ def execute_nuclei_scan(target, params):
     try:
         severity = params.get('severity', '')
         tags = params.get('tags', '')
-        additional_args = params.get('additional_args', '')
-
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['nuclei', '-u', target]
         if severity:
             cmd_parts.extend(['-severity', severity])
@@ -9878,7 +10295,7 @@ def execute_nuclei_scan(target, params):
 def execute_nikto_scan(target, params):
     """Execute nikto scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['nikto', '-h', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9890,7 +10307,7 @@ def execute_nikto_scan(target, params):
 def execute_sqlmap_scan(target, params):
     """Execute sqlmap scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '--batch --random-agent')
+        additional_args = safe_additional_args(params.get('additional_args', '--batch --random-agent'))
         cmd_parts = ['sqlmap', '-u', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9903,8 +10320,7 @@ def execute_ffuf_scan(target, params):
     """Execute ffuf scan with optimized parameters"""
     try:
         wordlist = params.get('wordlist', '/usr/share/wordlists/dirb/common.txt')
-        additional_args = params.get('additional_args', '')
-
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         # Ensure target has FUZZ placeholder
         if 'FUZZ' not in target:
             target = target.rstrip('/') + '/FUZZ'
@@ -9921,8 +10337,7 @@ def execute_feroxbuster_scan(target, params):
     """Execute feroxbuster scan with optimized parameters"""
     try:
         wordlist = params.get('wordlist', '/usr/share/wordlists/dirb/common.txt')
-        additional_args = params.get('additional_args', '')
-
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['feroxbuster', '-u', target, '-w', wordlist]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9934,7 +10349,7 @@ def execute_feroxbuster_scan(target, params):
 def execute_katana_scan(target, params):
     """Execute katana scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['katana', '-u', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9946,9 +10361,17 @@ def execute_katana_scan(target, params):
 def execute_httpx_scan(target, params):
     """Execute httpx scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '-tech-detect -status-code')
-        # Use shell command with pipe for httpx
-        cmd = f"echo {target} | httpx {additional_args}"
+        additional_args = safe_additional_args(params.get('additional_args', '-tech-detect -status-code'))
+        # HEXSTRIKE_HTTPX_BIN pins the absolute path to ProjectDiscovery's Go
+        # httpx binary. A bare "httpx" is ambiguous: pip's httpx[cli] package
+        # installs a same-named console script earlier on PATH (/usr/bin),
+        # which silently shadows the real recon tool and fails with a
+        # click-style "No such option" error instead of running the scan.
+        # Targets are piped via stdin (one per line) rather than -l, since
+        # -l expects a filename, not an inline host list.
+        targets = [t.strip() for t in str(target).split(",") if t.strip()]
+        stdin_hosts = "\\n".join(targets)
+        cmd = f"printf '%b' {shlex.quote(stdin_hosts)} | {HEXSTRIKE_HTTPX_BIN} {additional_args}"
 
         return execute_command(cmd)
     except Exception as e:
@@ -9957,7 +10380,7 @@ def execute_httpx_scan(target, params):
 def execute_wpscan_scan(target, params):
     """Execute wpscan scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '--enumerate p,t,u')
+        additional_args = safe_additional_args(params.get('additional_args', '--enumerate p,t,u'))
         cmd_parts = ['wpscan', '--url', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9969,7 +10392,7 @@ def execute_wpscan_scan(target, params):
 def execute_dirsearch_scan(target, params):
     """Execute dirsearch scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['dirsearch', '-u', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9981,7 +10404,7 @@ def execute_dirsearch_scan(target, params):
 def execute_arjun_scan(target, params):
     """Execute arjun scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['arjun', '-u', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -9993,7 +10416,7 @@ def execute_arjun_scan(target, params):
 def execute_paramspider_scan(target, params):
     """Execute paramspider scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['paramspider', '-d', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -10005,7 +10428,7 @@ def execute_paramspider_scan(target, params):
 def execute_dalfox_scan(target, params):
     """Execute dalfox scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['dalfox', 'url', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -10017,10 +10440,17 @@ def execute_dalfox_scan(target, params):
 def execute_amass_scan(target, params):
     """Execute amass scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['amass', 'enum', '-d', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
+        # amass's own -timeout (minutes) bounds runtime deterministically —
+        # without it, passive/active enum can run well past the generic
+        # execute_command wrapper's window and get hard-killed mid-write
+        # instead of exiting cleanly with partial results. Only added when
+        # the caller hasn't already set one via additional_args.
+        if "-timeout" not in cmd_parts:
+            cmd_parts.extend(["-timeout", str(HEXSTRIKE_AMASS_TIMEOUT_MIN)])
 
         return execute_command(' '.join(cmd_parts))
     except Exception as e:
@@ -10029,7 +10459,7 @@ def execute_amass_scan(target, params):
 def execute_subfinder_scan(target, params):
     """Execute subfinder scan with optimized parameters"""
     try:
-        additional_args = params.get('additional_args', '')
+        additional_args = safe_additional_args(params.get('additional_args', ''))
         cmd_parts = ['subfinder', '-d', target]
         if additional_args:
             cmd_parts.extend(additional_args.split())
@@ -10324,15 +10754,29 @@ def create_comprehensive_bugbounty_assessment():
 # SECURITY TOOLS API ENDPOINTS
 # ============================================================================
 
+def safe_shell_arg(value: str) -> str:
+    """Quote a single client-supplied value (target, URL, port list, wordlist
+    path, ...) for safe interpolation into a shell=True command string.
+
+    These endpoints build a command line by string interpolation rather than
+    passing an argv list to subprocess, so every value that isn't a fixed
+    flag chosen by this code must go through shlex.quote() before it reaches
+    the string. This does not cover an 'additional_args' style parameter
+    that is meant to carry multiple space-separated flags; that class of
+    parameter needs its own flag allowlist, not quoting, since quoting the
+    whole string would just pass it through as one broken argument.
+    """
+    return shlex.quote(str(value))
+
 @app.route("/api/tools/nmap", methods=["POST"])
 def nmap():
     """Execute nmap scan with enhanced logging, caching, and intelligent error handling"""
     try:
         params = request.json
-        target = params.get("target", "")
+        target = (params.get("target") or "").strip()
         scan_type = params.get("scan_type", "-sCV")
         ports = params.get("ports", "")
-        additional_args = params.get("additional_args", "-T4 -Pn")
+        additional_args = safe_additional_args(params.get("additional_args", "-T4 -Pn"))
         use_recovery = params.get("use_recovery", True)
 
         if not target:
@@ -10344,12 +10788,12 @@ def nmap():
         command = f"nmap {scan_type}"
 
         if ports:
-            command += f" -p {ports}"
+            command += f" -p {safe_shell_arg(ports)}"
 
         if additional_args:
             command += f" {additional_args}"
 
-        command += f" {target}"
+        command += f" {safe_shell_arg(target)}"
 
         logger.info(f"🔍 Starting Nmap scan: {target}")
 
@@ -10382,8 +10826,10 @@ def gobuster():
         url = params.get("url", "")
         mode = params.get("mode", "dir")
         wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
-        additional_args = params.get("additional_args", "")
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         use_recovery = params.get("use_recovery", True)
+
+        adjusted_args, auto_flag = _auto_handle_gobuster_wildcard(url, mode, additional_args)
 
         if not url:
             logger.warning("🌐 Gobuster called without URL parameter")
@@ -10398,10 +10844,13 @@ def gobuster():
                 "error": f"Invalid mode: {mode}. Must be one of: dir, dns, fuzz, vhost"
             }), 400
 
-        command = f"gobuster {mode} -u {url} -w {wordlist}"
+        command = f"gobuster {mode} -u {safe_shell_arg(url)} -w {safe_shell_arg(wordlist)}"
 
-        if additional_args:
-            command += f" {additional_args}"
+        if adjusted_args:
+            command += f" {adjusted_args}"
+
+        if auto_flag:
+            logger.info(f"🧪 Applied Gobuster auto-adjustment: {auto_flag}")
 
         logger.info(f"📁 Starting Gobuster {mode} scan: {url}")
 
@@ -10411,7 +10860,8 @@ def gobuster():
                 "target": url,
                 "mode": mode,
                 "wordlist": wordlist,
-                "additional_args": additional_args
+                "additional_args": adjusted_args,
+                "auto_adjustment": auto_flag
             }
             result = execute_command_with_recovery("gobuster", command, tool_params)
         else:
@@ -10435,7 +10885,7 @@ def nuclei():
         severity = params.get("severity", "")
         tags = params.get("tags", "")
         template = params.get("template", "")
-        additional_args = params.get("additional_args", "")
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         use_recovery = params.get("use_recovery", True)
 
         if not target:
@@ -10497,8 +10947,7 @@ def prowler():
         checks = params.get("checks", "")
         output_dir = params.get("output_dir", "/tmp/prowler_output")
         output_format = params.get("output_format", "json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         # Ensure output directory exists
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -10514,7 +10963,7 @@ def prowler():
             command += f" --checks {checks}"
 
         command += f" --output-directory {output_dir}"
-        command += f" --output-format {output_format}"
+        command += f" --output-formats {output_format}"
 
         if additional_args:
             command += f" {additional_args}"
@@ -10540,8 +10989,7 @@ def trivy():
         output_format = params.get("output_format", "json")
         severity = params.get("severity", "")
         output_file = params.get("output_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 Trivy called without target parameter")
             return jsonify({
@@ -10588,8 +11036,7 @@ def scout_suite():
         report_dir = params.get("report_dir", "/tmp/scout-suite")
         services = params.get("services", "")
         exceptions = params.get("exceptions", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         # Ensure report directory exists
         Path(report_dir).mkdir(parents=True, exist_ok=True)
 
@@ -10626,8 +11073,7 @@ def cloudmapper():
         action = params.get("action", "collect")  # collect, prepare, webserver, find_admins, etc.
         account = params.get("account", "")
         config = params.get("config", "config.json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not account and action != "webserver":
             logger.warning("☁️  CloudMapper called without account parameter")
             return jsonify({"error": "Account parameter is required for most actions"}), 400
@@ -10660,8 +11106,7 @@ def pacu():
         modules = params.get("modules", "")
         data_services = params.get("data_services", "")
         regions = params.get("regions", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         # Create Pacu command sequence
         commands = []
         commands.append(f"set_session {session_name}")
@@ -10714,8 +11159,7 @@ def kube_hunter():
         interface = params.get("interface", "")
         active = params.get("active", False)
         report = params.get("report", "json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         command = "kube-hunter"
 
         if target:
@@ -10756,8 +11200,7 @@ def kube_bench():
         version = params.get("version", "")
         config_dir = params.get("config_dir", "")
         output_format = params.get("output_format", "json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         command = "kube-bench"
 
         if targets:
@@ -10791,8 +11234,7 @@ def docker_bench_security():
         checks = params.get("checks", "")  # Specific checks to run
         exclude = params.get("exclude", "")  # Checks to exclude
         output_file = params.get("output_file", "/tmp/docker-bench-results.json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         command = "docker-bench-security"
 
         if checks:
@@ -10824,17 +11266,18 @@ def clair():
         image = params.get("image", "")
         config = params.get("config", "/etc/clair/config.yaml")
         output_format = params.get("output_format", "json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not image:
             logger.warning("🐳 Clair called without image parameter")
             return jsonify({"error": "Image parameter is required"}), 400
 
         # Use clairctl for scanning
-        command = f"clairctl analyze {image}"
+        command = "clairctl"
 
         if config:
             command += f" --config {config}"
+
+        command += f" report {image}"
 
         if output_format:
             command += f" --format {output_format}"
@@ -10859,15 +11302,14 @@ def falco():
         rules_file = params.get("rules_file", "")
         output_format = params.get("output_format", "json")
         duration = params.get("duration", 60)  # seconds
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         command = f"timeout {duration} falco"
 
         if config_file:
-            command += f" --config {config_file}"
+            command += f" -c {config_file}"
 
         if rules_file:
-            command += f" --rules {rules_file}"
+            command += f" -r {rules_file}"
 
         if output_format == "json":
             command += " --json"
@@ -10893,8 +11335,7 @@ def checkov():
         check = params.get("check", "")
         skip_check = params.get("skip_check", "")
         output_format = params.get("output_format", "json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         command = f"checkov -d {directory}"
 
         if framework:
@@ -10930,8 +11371,7 @@ def terrascan():
         policy_type = params.get("policy_type", "")
         output_format = params.get("output_format", "json")
         severity = params.get("severity", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         command = f"terrascan scan -t {scan_type} -d {iac_dir}"
 
         if policy_type:
@@ -10961,8 +11401,7 @@ def dirb():
         params = request.json
         url = params.get("url", "")
         wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Dirb called without URL parameter")
             return jsonify({
@@ -10990,8 +11429,7 @@ def nikto():
     try:
         params = request.json
         target = params.get("target", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 Nikto called without target parameter")
             return jsonify({
@@ -11020,8 +11458,7 @@ def sqlmap():
         params = request.json
         url = params.get("url", "")
         data = params.get("data", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🎯 SQLMap called without URL parameter")
             return jsonify({
@@ -11101,8 +11538,7 @@ def hydra():
         username_file = params.get("username_file", "")
         password = params.get("password", "")
         password_file = params.get("password_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target or not service:
             logger.warning("🎯 Hydra called without target or service parameter")
             return jsonify({
@@ -11148,10 +11584,9 @@ def john():
     try:
         params = request.json
         hash_file = params.get("hash_file", "")
-        wordlist = params.get("wordlist", "/usr/share/wordlists/rockyou.txt")
+        wordlist = params.get("wordlist", "./wordlists/rockyou.txt")
         format_type = params.get("format", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not hash_file:
             logger.warning("🔐 John called without hash_file parameter")
             return jsonify({
@@ -11187,8 +11622,7 @@ def wpscan():
     try:
         params = request.json
         url = params.get("url", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 WPScan called without URL parameter")
             return jsonify({
@@ -11216,8 +11650,7 @@ def enum4linux():
     try:
         params = request.json
         target = params.get("target", "")
-        additional_args = params.get("additional_args", "-a")
-
+        additional_args = safe_additional_args(params.get("additional_args", "-a"))
         if not target:
             logger.warning("🎯 Enum4linux called without target parameter")
             return jsonify({
@@ -11242,11 +11675,10 @@ def ffuf():
     try:
         params = request.json
         url = params.get("url", "")
-        wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
+        wordlist = params.get("wordlist", "./wordlists/dirb/common.txt")
         mode = params.get("mode", "directory")
         match_codes = params.get("match_codes", "200,204,301,302,307,401,403")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 FFuf called without URL parameter")
             return jsonify({
@@ -11290,8 +11722,7 @@ def netexec():
         password = params.get("password", "")
         hash_value = params.get("hash", "")
         module = params.get("module", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 NetExec called without target parameter")
             return jsonify({
@@ -11332,8 +11763,7 @@ def amass():
         params = request.json
         domain = params.get("domain", "")
         mode = params.get("mode", "enum")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 Amass called without domain parameter")
             return jsonify({
@@ -11349,6 +11779,12 @@ def amass():
 
         if additional_args:
             command += f" {additional_args}"
+
+        # See execute_amass_scan() for why: bound runtime with amass's own
+        # -timeout so it exits deterministically instead of getting
+        # hard-killed by the generic command wrapper mid-write.
+        if "-timeout" not in command:
+            command += f" -timeout {HEXSTRIKE_AMASS_TIMEOUT_MIN}"
 
         logger.info(f"🔍 Starting Amass {mode}: {domain}")
         result = execute_command(command)
@@ -11368,10 +11804,9 @@ def hashcat():
         hash_file = params.get("hash_file", "")
         hash_type = params.get("hash_type", "")
         attack_mode = params.get("attack_mode", "0")
-        wordlist = params.get("wordlist", "/usr/share/wordlists/rockyou.txt")
+        wordlist = params.get("wordlist", "./wordlists/rockyou.txt")
         mask = params.get("mask", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not hash_file:
             logger.warning("🔐 Hashcat called without hash_file parameter")
             return jsonify({
@@ -11412,8 +11847,7 @@ def subfinder():
         domain = params.get("domain", "")
         silent = params.get("silent", True)
         all_sources = params.get("all_sources", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 Subfinder called without domain parameter")
             return jsonify({
@@ -11450,8 +11884,7 @@ def smbmap():
         username = params.get("username", "")
         password = params.get("password", "")
         domain = params.get("domain", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 SMBMap called without target parameter")
             return jsonify({
@@ -11497,8 +11930,7 @@ def rustscan():
         batch_size = params.get("batch_size", 4500)
         timeout = params.get("timeout", 1500)
         scripts = params.get("scripts", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 Rustscan called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11534,8 +11966,7 @@ def masscan():
         router_mac = params.get("router_mac", "")
         source_ip = params.get("source_ip", "")
         banners = params.get("banners", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 Masscan called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11579,8 +12010,7 @@ def nmap_advanced():
         version_detection = params.get("version_detection", False)
         aggressive = params.get("aggressive", False)
         stealth = params.get("stealth", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 Advanced Nmap called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11631,8 +12061,7 @@ def autorecon():
         service_scans = params.get("service_scans", "default")
         heartbeat = params.get("heartbeat", 60)
         timeout = params.get("timeout", 300)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 AutoRecon called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11669,8 +12098,7 @@ def enum4linux_ng():
         users = params.get("users", True)
         groups = params.get("groups", True)
         policy = params.get("policy", True)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 Enum4linux-ng called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11686,19 +12114,21 @@ def enum4linux_ng():
         if domain:
             command += f" -d {domain}"
 
-        # Add specific enumeration options
-        enum_options = []
-        if shares:
-            enum_options.append("S")
-        if users:
-            enum_options.append("U")
-        if groups:
-            enum_options.append("G")
-        if policy:
-            enum_options.append("P")
+        enum_flags = []
 
-        if enum_options:
-            command += f" -A {','.join(enum_options)}"
+        if shares:
+            enum_flags.append("-S")
+        if users:
+            enum_flags.append("-U")
+        if groups:
+            enum_flags.append("-G")
+        if policy:
+            enum_flags.append("-P")
+
+        if enum_flags:
+            command += " " + " ".join(enum_flags)
+        else:
+            command += " -A"
 
         if additional_args:
             command += f" {additional_args}"
@@ -11721,8 +12151,7 @@ def rpcclient():
         password = params.get("password", "")
         domain = params.get("domain", "")
         commands = params.get("commands", "enumdomusers;enumdomgroups;querydominfo")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 rpcclient called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11763,8 +12192,7 @@ def nbtscan():
         target = params.get("target", "")
         verbose = params.get("verbose", False)
         timeout = params.get("timeout", 2)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 nbtscan called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
@@ -11797,8 +12225,7 @@ def arp_scan():
         local_network = params.get("local_network", False)
         timeout = params.get("timeout", 500)
         retry = params.get("retry", 3)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target and not local_network:
             logger.warning("🎯 arp-scan called without target parameter")
             return jsonify({"error": "Target parameter or local_network flag is required"}), 400
@@ -11835,8 +12262,7 @@ def responder():
         force_wpad_auth = params.get("force_wpad_auth", False)
         fingerprint = params.get("fingerprint", False)
         duration = params.get("duration", 300)  # 5 minutes default
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not interface:
             logger.warning("🎯 Responder called without interface parameter")
             return jsonify({"error": "Interface parameter is required"}), 400
@@ -11874,8 +12300,7 @@ def volatility():
         memory_file = params.get("memory_file", "")
         plugin = params.get("plugin", "")
         profile = params.get("profile", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not memory_file:
             logger.warning("🧠 Volatility called without memory_file parameter")
             return jsonify({
@@ -11918,8 +12343,7 @@ def msfvenom():
         output_file = params.get("output_file", "")
         encoder = params.get("encoder", "")
         iterations = params.get("iterations", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not payload:
             logger.warning("🚀 MSFVenom called without payload parameter")
             return jsonify({
@@ -11965,8 +12389,7 @@ def gdb():
         binary = params.get("binary", "")
         commands = params.get("commands", "")
         script_file = params.get("script_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 GDB called without binary parameter")
             return jsonify({
@@ -12013,8 +12436,7 @@ def radare2():
         params = request.json
         binary = params.get("binary", "")
         commands = params.get("commands", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 Radare2 called without binary parameter")
             return jsonify({
@@ -12056,8 +12478,7 @@ def binwalk():
         params = request.json
         file_path = params.get("file_path", "")
         extract = params.get("extract", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not file_path:
             logger.warning("🔧 Binwalk called without file_path parameter")
             return jsonify({
@@ -12091,8 +12512,7 @@ def ropgadget():
         params = request.json
         binary = params.get("binary", "")
         gadget_type = params.get("gadget_type", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 ROPgadget called without binary parameter")
             return jsonify({
@@ -12150,8 +12570,7 @@ def xxd():
         file_path = params.get("file_path", "")
         offset = params.get("offset", "0")
         length = params.get("length", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not file_path:
             logger.warning("🔧 XXD called without file_path parameter")
             return jsonify({
@@ -12185,8 +12604,7 @@ def strings():
         params = request.json
         file_path = params.get("file_path", "")
         min_len = params.get("min_len", 4)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not file_path:
             logger.warning("🔧 Strings called without file_path parameter")
             return jsonify({
@@ -12217,8 +12635,7 @@ def objdump():
         params = request.json
         binary = params.get("binary", "")
         disassemble = params.get("disassemble", True)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 Objdump called without binary parameter")
             return jsonify({
@@ -12261,8 +12678,7 @@ def ghidra():
         script_file = params.get("script_file", "")
         analysis_timeout = params.get("analysis_timeout", 300)
         output_format = params.get("output_format", "xml")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 Ghidra called without binary parameter")
             return jsonify({"error": "Binary parameter is required"}), 400
@@ -12278,7 +12694,7 @@ def ghidra():
             command += f" -postScript {script_file}"
 
         if output_format == "xml":
-            command += f" -postScript ExportXml.java {project_dir}/analysis.xml"
+            command += f" -postScript ExportProgramScript.java {project_dir}/analysis.xml true"
 
         if additional_args:
             command += f" {additional_args}"
@@ -12301,8 +12717,7 @@ def pwntools():
         target_host = params.get("target_host", "")
         target_port = params.get("target_port", 0)
         exploit_type = params.get("exploit_type", "local")  # local, remote, format_string, rop
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not script_content and not target_binary:
             logger.warning("🔧 Pwntools called without script content or target binary")
             return jsonify({"error": "Script content or target binary is required"}), 400
@@ -12373,8 +12788,7 @@ def one_gadget():
         params = request.json
         libc_path = params.get("libc_path", "")
         level = params.get("level", 1)  # 0, 1, 2 for different constraint levels
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not libc_path:
             logger.warning("🔧 one_gadget called without libc_path parameter")
             return jsonify({"error": "libc_path parameter is required"}), 400
@@ -12400,8 +12814,7 @@ def libc_database():
         action = params.get("action", "find")  # find, dump, download
         symbols = params.get("symbols", "")  # format: "symbol1:offset1 symbol2:offset2"
         libc_id = params.get("libc_id", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if action == "find" and not symbols:
             logger.warning("🔧 libc-database find called without symbols")
             return jsonify({"error": "Symbols parameter is required for find action"}), 400
@@ -12442,8 +12855,7 @@ def gdb_peda():
         commands = params.get("commands", "")
         attach_pid = params.get("attach_pid", 0)
         core_file = params.get("core_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary and not attach_pid and not core_file:
             logger.warning("🔧 GDB-PEDA called without binary, PID, or core file")
             return jsonify({"error": "Binary, PID, or core file parameter is required"}), 400
@@ -12505,8 +12917,7 @@ def angr():
         find_address = params.get("find_address", "")
         avoid_addresses = params.get("avoid_addresses", "")
         analysis_type = params.get("analysis_type", "symbolic")  # symbolic, cfg, static
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 angr called without binary parameter")
             return jsonify({"error": "Binary parameter is required"}), 400
@@ -12596,8 +13007,7 @@ def ropper():
         quality = params.get("quality", 1)  # 1-5, higher = better quality
         arch = params.get("arch", "")  # x86, x86_64, arm, etc.
         search_string = params.get("search_string", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 ropper called without binary parameter")
             return jsonify({"error": "Binary parameter is required"}), 400
@@ -12642,8 +13052,7 @@ def pwninit():
         libc = params.get("libc", "")
         ld = params.get("ld", "")
         template_type = params.get("template_type", "python")  # python, c
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not binary:
             logger.warning("🔧 pwninit called without binary parameter")
             return jsonify({"error": "Binary parameter is required"}), 400
@@ -12680,10 +13089,9 @@ def feroxbuster():
     try:
         params = request.json
         url = params.get("url", "")
-        wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
+        wordlist = params.get("wordlist", "./wordlists/dirb/common.txt")
         threads = params.get("threads", 10)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Feroxbuster called without URL parameter")
             return jsonify({
@@ -12710,20 +13118,59 @@ def dotdotpwn():
     """Execute DotDotPwn for directory traversal testing with enhanced logging"""
     try:
         params = request.json
-        target = params.get("target", "")
+        target = (params.get("target") or "").strip()
         module = params.get("module", "http")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🎯 DotDotPwn called without target parameter")
             return jsonify({
                 "error": "Target parameter is required"
             }), 400
 
-        command = f"dotdotpwn -m {module} -h {target}"
+        host = target
+        port = None
+
+        if "://" in host:
+            parsed = urlparse(host)
+            host = parsed.hostname or host
+            port = parsed.port
+            if port is None:
+                if parsed.scheme == "https":
+                    port = 443
+                elif parsed.scheme == "http":
+                    port = 80
+        else:
+            host_part = host.split("/", 1)[0]
+            if ":" in host_part:
+                candidate_host, candidate_port = host_part.rsplit(":", 1)
+                if candidate_port.isdigit():
+                    host = candidate_host
+                    port = int(candidate_port)
+                else:
+                    host = host_part
+            else:
+                host = host_part
+
+        command = f"dotdotpwn -m {module}"
+
+        if module == "http-url":
+            url = target or ""
+            if "TRAVERSAL" not in url.upper():
+                separator = "&" if "?" in url else ("" if url.endswith("TRAVERSAL") else "?")
+                url = f"{url}{separator}TRAVERSAL"
+            command += f" -u {url}"
+            if url.lower().startswith("https://") and (not additional_args or " -S" not in additional_args):
+                command += " -S"
+        else:
+            command += f" -h {host}"
+
+        has_port_flag = bool(additional_args and re.search(r"(^|\s)(-x)\b", additional_args))
 
         if additional_args:
             command += f" {additional_args}"
+
+        if port and not has_port_flag and module != "http-url":
+            command += f" -x {port}"
 
         command += " -b"
 
@@ -12744,8 +13191,7 @@ def xsser():
         params = request.json
         url = params.get("url", "")
         params_str = params.get("params", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 XSSer called without URL parameter")
             return jsonify({
@@ -12777,8 +13223,7 @@ def wfuzz():
         params = request.json
         url = params.get("url", "")
         wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Wfuzz called without URL parameter")
             return jsonify({
@@ -12811,11 +13256,10 @@ def dirsearch():
         params = request.json
         url = params.get("url", "")
         extensions = params.get("extensions", "php,html,js,txt,xml,json")
-        wordlist = params.get("wordlist", "/usr/share/wordlists/dirsearch/common.txt")
+        wordlist = params.get("wordlist", "./wordlists/dirsearch/common.txt")
         threads = params.get("threads", 30)
         recursive = params.get("recursive", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Dirsearch called without URL parameter")
             return jsonify({"error": "URL parameter is required"}), 400
@@ -12846,8 +13290,7 @@ def katana():
         js_crawl = params.get("js_crawl", True)
         form_extraction = params.get("form_extraction", True)
         output_format = params.get("output_format", "json")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Katana called without URL parameter")
             return jsonify({"error": "URL parameter is required"}), 400
@@ -12883,8 +13326,7 @@ def gau():
         providers = params.get("providers", "wayback,commoncrawl,otx,urlscan")
         include_subs = params.get("include_subs", True)
         blacklist = params.get("blacklist", "png,jpg,gif,jpeg,swf,woff,svg,pdf,css,ico")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 Gau called without domain parameter")
             return jsonify({"error": "Domain parameter is required"}), 400
@@ -12919,8 +13361,7 @@ def waybackurls():
         domain = params.get("domain", "")
         get_versions = params.get("get_versions", False)
         no_subs = params.get("no_subs", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 Waybackurls called without domain parameter")
             return jsonify({"error": "Domain parameter is required"}), 400
@@ -12955,8 +13396,7 @@ def arjun():
         delay = params.get("delay", 0)
         threads = params.get("threads", 25)
         stable = params.get("stable", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Arjun called without URL parameter")
             return jsonify({"error": "URL parameter is required"}), 400
@@ -12992,8 +13432,7 @@ def paramspider():
         level = params.get("level", 2)
         exclude = params.get("exclude", "png,jpg,gif,jpeg,swf,woff,svg,pdf,css,ico")
         output = params.get("output", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 ParamSpider called without domain parameter")
             return jsonify({"error": "Domain parameter is required"}), 400
@@ -13023,12 +13462,11 @@ def x8():
     try:
         params = request.json
         url = params.get("url", "")
-        wordlist = params.get("wordlist", "/usr/share/wordlists/x8/params.txt")
+        wordlist = params.get("wordlist", "./wordlists/x8/params.txt")
         method = params.get("method", "GET")
         body = params.get("body", "")
         headers = params.get("headers", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 x8 called without URL parameter")
             return jsonify({"error": "URL parameter is required"}), 400
@@ -13062,8 +13500,7 @@ def jaeles():
         config = params.get("config", "")
         threads = params.get("threads", 20)
         timeout = params.get("timeout", 20)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🌐 Jaeles called without URL parameter")
             return jsonify({"error": "URL parameter is required"}), 400
@@ -13098,8 +13535,7 @@ def dalfox():
         mining_dom = params.get("mining_dom", True)
         mining_dict = params.get("mining_dict", True)
         custom_payload = params.get("custom_payload", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url and not pipe_mode:
             logger.warning("🌐 Dalfox called without URL parameter")
             return jsonify({"error": "URL parameter is required"}), 400
@@ -13138,6 +13574,8 @@ def httpx():
     try:
         params = request.json
         target = params.get("target", "")
+        target_file = params.get("target_file", "")
+        url = params.get("url", "")
         probe = params.get("probe", True)
         tech_detect = params.get("tech_detect", False)
         status_code = params.get("status_code", False)
@@ -13145,13 +13583,17 @@ def httpx():
         title = params.get("title", False)
         web_server = params.get("web_server", False)
         threads = params.get("threads", 50)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🌐 httpx called without target parameter")
             return jsonify({"error": "Target parameter is required"}), 400
 
-        command = f"httpx -l {target} -t {threads}"
+        # See execute_httpx_scan() for why: absolute path avoids the
+        # pip httpx[cli] PATH collision, and stdin piping replaces -l
+        # (which expects a filename, not an inline comma/space list).
+        targets = [t.strip() for t in re.split(r"[,\s]+", str(target)) if t.strip()]
+        stdin_hosts = "\\n".join(targets)
+        command = f"printf '%b' {shlex.quote(stdin_hosts)} | {HEXSTRIKE_HTTPX_BIN} -t {threads}"
 
         if probe:
             command += " -probe"
@@ -13189,8 +13631,7 @@ def anew():
         params = request.json
         input_data = params.get("input_data", "")
         output_file = params.get("output_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not input_data:
             logger.warning("📝 Anew called without input data")
             return jsonify({"error": "Input data is required"}), 400
@@ -13218,8 +13659,7 @@ def qsreplace():
         params = request.json
         urls = params.get("urls", "")
         replacement = params.get("replacement", "FUZZ")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not urls:
             logger.warning("🌐 qsreplace called without URLs")
             return jsonify({"error": "URLs parameter is required"}), 400
@@ -13245,8 +13685,7 @@ def uro():
         urls = params.get("urls", "")
         whitelist = params.get("whitelist", "")
         blacklist = params.get("blacklist", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not urls:
             logger.warning("🌐 uro called without URLs")
             return jsonify({"error": "URLs parameter is required"}), 400
@@ -13631,6 +14070,9 @@ class BrowserAgent:
 
     def setup_browser(self, headless: bool = True, proxy_port: int = None):
         """Setup Chrome browser with security testing options"""
+        if not SELENIUM_AVAILABLE:
+            logger.error("BrowserAgent requires extras: pip install -r requirements-optional.txt (selenium)")
+            return False
         try:
             chrome_options = Options()
 
@@ -13684,7 +14126,7 @@ class BrowserAgent:
             time.sleep(wait_time)
 
             # Take screenshot
-            screenshot_path = f"/tmp/hexstrike_screenshot_{int(time.time())}.png"
+            screenshot_path = str(Path(tempfile.gettempdir()) / f"hexstrike_screenshot_{int(time.time())}.png")
             self.driver.save_screenshot(screenshot_path)
             self.screenshots.append(screenshot_path)
 
@@ -13755,7 +14197,7 @@ class BrowserAgent:
             name = ck.get('name','')
             # Selenium cookie dict may lack flags; attempt JS check if not present
             # (we keep lightweight – deeper flag detection requires CDP)
-            if name.lower() in ('sessionid','phpseSSID','jsessionid') and len(ck.get('value','')) < 16:
+            if name.lower() in ('sessionid','phpsessid','jsessionid') and len(ck.get('value','')) < 16:
                 issues.append({'type':'weak_session_cookie','severity':'medium','description':f'Session cookie {name} appears short'})
         return issues
 
@@ -14186,7 +14628,7 @@ def browser_agent_endpoint():
                     400,
                 )
 
-            screenshot_path = f"/tmp/hexstrike_screenshot_{int(time.time())}.png"
+            screenshot_path = str(Path(tempfile.gettempdir()) / f"hexstrike_screenshot_{int(time.time())}.png")
             browser_agent.driver.save_screenshot(screenshot_path)
 
             return jsonify(
@@ -14220,6 +14662,110 @@ def browser_agent_endpoint():
             f"{ModernVisualEngine.format_error_card('ERROR', 'BrowserAgent', str(e))}"
         )
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+@app.route("/api/tools/burpsuite", methods=["POST"])
+def burpsuite():
+    """Execute Burp Suite with enhanced logging; fallback to alternative workflow when CLI unsupported."""
+    try:
+        params = request.json or {}
+
+        project_file = params.get("project_file", "")
+        config_file = params.get("config_file", "")
+        target = params.get("target", "")
+        headless = params.get("headless", False)
+        scan_type = params.get("scan_type", "")
+        scan_config = params.get("scan_config", "")
+        output_file = params.get("output_file", "")
+        additional_args = params.get("additional_args", "")
+
+        if not target:
+            logger.warning("🎯 Burp Suite called without target parameter")
+            return jsonify({"error": "Target parameter is required"}), 400
+
+        command_parts = ["burpsuite"]
+
+        if headless:
+            command_parts.append("--headless")
+
+        if project_file:
+            command_parts.append(f'--project-file "{project_file}"')
+
+        if config_file:
+            command_parts.append(f'--config-file "{config_file}"')
+
+        if scan_type:
+            command_parts.append(f'--scan-type "{scan_type}"')
+
+        if scan_config:
+            command_parts.append(f'--scan-config "{scan_config}"')
+
+        command_parts.append(f'--scan-url "{target}"')
+
+        if output_file:
+            command_parts.append(f'--report-file "{output_file}"')
+
+        if additional_args:
+            command_parts.append(additional_args)
+
+        command = " ".join(command_parts)
+
+        logger.info(
+            f"{ModernVisualEngine.create_section_header('BURP SUITE', '🛡️', 'ORANGE_RED')}"
+        )
+        logger.info(
+            f"{ModernVisualEngine.format_tool_status('BurpSuite', 'RUNNING', target)}"
+        )
+
+        tool_params = {
+            "project_file": project_file,
+            "config_file": config_file,
+            "target": target,
+            "headless": headless,
+            "scan_type": scan_type,
+            "scan_config": scan_config,
+            "output_file": output_file,
+            "additional_args": additional_args,
+        }
+
+        result = execute_command_with_recovery(
+            "burpsuite", command, tool_params, use_cache=False
+        )
+
+        if result.get("success"):
+            logger.info(
+                f"{ModernVisualEngine.format_tool_status('BurpSuite', 'SUCCESS', target)}"
+            )
+            return jsonify(result)
+
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        fallback_triggers = [
+            "Unrecognized command-line argument",
+            "Do you accept the terms and conditions",
+        ]
+
+        if any(trigger in stdout for trigger in fallback_triggers):
+            logger.warning(
+                f"{ModernVisualEngine.format_tool_status('BurpSuite', 'RECOVERY', 'CLI unsupported, using alternative workflow')}"
+            )
+            fallback_params = params.copy()
+            with app.test_request_context(
+                "/api/tools/burpsuite-alternative",
+                method="POST",
+                json=fallback_params,
+            ):
+                logger.warning("⚠️ Burp Suite CLI unsupported – falling back to alternative workflow")
+                return burpsuite_alternative()
+
+        logger.error(
+            f"{ModernVisualEngine.format_error_card('ERROR', 'BurpSuite', stderr or 'Unknown error')}"
+        )
+        return jsonify(result), 500
+
+    except Exception as e:
+        logger.error(f"💥 Error in burpsuite endpoint: {str(e)}")
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
 
 @app.route("/api/tools/burpsuite-alternative", methods=["POST"])
 def burpsuite_alternative():
@@ -14328,8 +14874,7 @@ def zap():
         host = params.get("host", "0.0.0.0")
         format_type = params.get("format", "xml")
         output_file = params.get("output_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target and scan_type != "daemon":
             logger.warning("🎯 ZAP called without target parameter")
             return jsonify({
@@ -14355,6 +14900,77 @@ def zap():
         if additional_args:
             command += f" {additional_args}"
 
+        if daemon:
+            # Idempotent non-blocking start with readiness probe
+            try:
+                with socket.create_connection((host, int(port)), timeout=0.5):
+                    logger.info(f"ZAP already listening on {host}:{port}")
+                    return jsonify({
+                        "stdout": f"ZAP already running on {host}:{port}",
+                        "stderr": "",
+                        "return_code": 0,
+                        "success": True,
+                        "timed_out": False,
+                        "partial_results": False,
+                        "execution_time": 0,
+                        "timestamp": datetime.now().isoformat()
+                    })
+            except Exception:
+                pass
+
+            logger.info(f"Starting ZAP daemon on {host}:{port}")
+            try:
+                subprocess.Popen(
+                    command,
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                logger.error(f"Failed to start ZAP daemon: {e}")
+                return jsonify({
+                    "stdout": "",
+                    "stderr": str(e),
+                    "return_code": 1,
+                    "success": False,
+                    "timed_out": False,
+                    "partial_results": False,
+                    "execution_time": 0,
+                    "timestamp": datetime.now().isoformat()
+                }), 500
+
+            start_ts = time.time()
+            deadline = start_ts + 30.0
+            while time.time() < deadline:
+                try:
+                    with socket.create_connection((host, int(port)), timeout=0.5):
+                        exec_time = time.time() - start_ts
+                        logger.info(f"ZAP daemon is ready on {host}:{port} in {exec_time:.2f}s")
+                        return jsonify({
+                            "stdout": f"ZAP listening on {host}:{port}",
+                            "stderr": "",
+                            "return_code": 0,
+                            "success": True,
+                            "timed_out": False,
+                            "partial_results": False,
+                            "execution_time": exec_time,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                except Exception:
+                    time.sleep(0.5)
+
+            logger.warning(f"ZAP daemon not ready after 30s on {host}:{port}")
+            return jsonify({
+                "stdout": "",
+                "stderr": f"ZAP did not become ready on {host}:{port} within 30s",
+                "return_code": 124,
+                "success": False,
+                "timed_out": True,
+                "partial_results": False,
+                "execution_time": 30.0,
+                "timestamp": datetime.now().isoformat()
+            })
+
         logger.info(f"🔍 Starting ZAP scan: {target}")
         result = execute_command(command)
         logger.info(f"📊 ZAP scan completed for {target}")
@@ -14371,8 +14987,7 @@ def wafw00f():
     try:
         params = request.json
         target = params.get("target", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not target:
             logger.warning("🛡️ Wafw00f called without target parameter")
             return jsonify({
@@ -14401,8 +15016,7 @@ def fierce():
         params = request.json
         domain = params.get("domain", "")
         dns_server = params.get("dns_server", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 Fierce called without domain parameter")
             return jsonify({
@@ -14435,8 +15049,7 @@ def dnsenum():
         domain = params.get("domain", "")
         dns_server = params.get("dns_server", "")
         wordlist = params.get("wordlist", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not domain:
             logger.warning("🌐 DNSenum called without domain parameter")
             return jsonify({
@@ -14846,7 +15459,7 @@ def api_fuzzer():
         base_url = params.get("base_url", "")
         endpoints = params.get("endpoints", [])
         methods = params.get("methods", ["GET", "POST", "PUT", "DELETE"])
-        wordlist = params.get("wordlist", "/usr/share/wordlists/api/api-endpoints.txt")
+        wordlist = params.get("wordlist", "./wordlists/api/api-endpoints.txt")
 
         if not base_url:
             logger.warning("🌐 API Fuzzer called without base_url parameter")
@@ -14920,6 +15533,11 @@ def graphql_scanner():
             "recommendations": []
         }
 
+        MITIGATION_HINTS = [
+            "maximum query", "complexity", "cost", "depth", "throttle",
+            "rate limit", "too many", "not supported"
+        ]
+
         # Test 1: Introspection query
         if introspection:
             introspection_query = '''
@@ -14927,59 +15545,112 @@ def graphql_scanner():
                 __schema {
                     types {
                         name
-                        fields {
-                            name
-                            type {
-                                name
-                            }
-                        }
                     }
                 }
             }
             '''
-
             clean_query = introspection_query.replace('\n', ' ').replace('  ', ' ').strip()
-            command = f"curl -s -X POST -H 'Content-Type: application/json' -d '{{\"query\":\"{clean_query}\"}}' '{endpoint}'"
+            command = (
+                "curl -s -X POST "
+                "-H 'Content-Type: application/json' "
+                f"-d '{{\"query\":\"{clean_query}\"}}' "
+                f"'{endpoint}'"
+            )
             result = execute_command(command, use_cache=False)
 
             results["tests_performed"].append("introspection_query")
 
-            if "data" in result.get("stdout", ""):
+            stdout = result.get("stdout", "") or ""
+            data = None
+            try:
+                data = json.loads(stdout)
+            except Exception:
+                data = None
+
+            if isinstance(data, dict) and data.get("data", {}).get("__schema"):
                 results["vulnerabilities"].append({
                     "type": "introspection_enabled",
                     "severity": "MEDIUM",
-                    "description": "GraphQL introspection is enabled"
+                    "description": "GraphQL introspection is enabled (data.__schema is present)"
                 })
 
         # Test 2: Query depth analysis
         deep_query = "{ " * query_depth + "field" + " }" * query_depth
-        command = f"curl -s -X POST -H 'Content-Type: application/json' -d '{{\"query\":\"{deep_query}\"}}' {endpoint}"
+        command = (
+            "curl -s -X POST "
+            "-H 'Content-Type: application/json' "
+            f"-d '{{\"query\":\"{deep_query}\"}}' "
+            f"'{endpoint}'"
+        )
         depth_result = execute_command(command, use_cache=False)
 
         results["tests_performed"].append("query_depth_analysis")
 
-        if "error" not in depth_result.get("stdout", "").lower():
-            results["vulnerabilities"].append({
-                "type": "no_query_depth_limit",
-                "severity": "HIGH",
-                "description": f"No query depth limiting detected (tested depth: {query_depth})"
-            })
+        depth_stdout = depth_result.get("stdout", "") or ""
+        depth_stdout_lower = depth_stdout.lower()
+
+        depth_json = None
+        try:
+            depth_json = json.loads(depth_stdout)
+        except Exception:
+            depth_json = None
+
+        is_graphql_like = (
+            isinstance(depth_json, dict)
+            and ("data" in depth_json or "errors" in depth_json)
+        )
+
+        if is_graphql_like:
+            has_error_word = "error" in depth_stdout_lower
+            has_mitigation_hint = any(h in depth_stdout_lower for h in MITIGATION_HINTS)
+            if not has_error_word and not has_mitigation_hint:
+                results["vulnerabilities"].append({
+                    "type": "no_query_depth_limit",
+                    "severity": "HIGH",
+                    "description": f"No explicit query depth limiting detected (tested depth: {query_depth})"
+                })
 
         # Test 3: Batch query testing
         batch_query = '[' + ','.join(['{\"query\":\"{field}\"}' for _ in range(10)]) + ']'
-        command = f"curl -s -X POST -H 'Content-Type: application/json' -d '{batch_query}' {endpoint}"
+        command = (
+            "curl -s -X POST "
+            "-H 'Content-Type: application/json' "
+            f"-d '{batch_query}' "
+            f"'{endpoint}'"
+        )
         batch_result = execute_command(command, use_cache=False)
 
         results["tests_performed"].append("batch_query_testing")
 
-        if "data" in batch_result.get("stdout", "") and batch_result.get("success"):
-            results["vulnerabilities"].append({
-                "type": "batch_queries_allowed",
-                "severity": "MEDIUM",
-                "description": "Batch queries are allowed without rate limiting"
-            })
+        batch_stdout = batch_result.get("stdout", "") or ""
+        batch_success = bool(batch_result.get("success"))
+        batch_data = None
+        try:
+            batch_data = json.loads(batch_stdout)
+        except Exception:
+            batch_data = None
 
-        # Generate recommendations
+        def _batch_not_supported_text(s: str) -> bool:
+            s_low = (s or "").lower()
+            return ("batch" in s_low) and ("not supported" in s_low)
+
+        if _batch_not_supported_text(batch_stdout):
+            pass
+        elif isinstance(batch_data, list) and len(batch_data) == 10:
+            ok_count = 0
+            for item in batch_data:
+                if isinstance(item, dict) and item.get("data"):
+                    ok_count += 1
+
+            if ok_count > 0:
+                results["vulnerabilities"].append({
+                    "type": "batch_queries_allowed",
+                    "severity": "MEDIUM",
+                    "description": f"Batch queries are allowed without visible rate limiting (OK items: {ok_count}/10)"
+                })
+        else:
+            pass
+
         if results["vulnerabilities"]:
             results["recommendations"] = [
                 "Disable introspection in production",
@@ -15001,6 +15672,7 @@ def graphql_scanner():
         return jsonify({
             "error": f"Server error: {str(e)}"
         }), 500
+
 
 @app.route("/api/tools/jwt_analyzer", methods=["POST"])
 def jwt_analyzer():
@@ -15240,8 +15912,7 @@ def volatility3():
         memory_file = params.get("memory_file", "")
         plugin = params.get("plugin", "")
         output_file = params.get("output_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not memory_file:
             logger.warning("🧠 Volatility3 called without memory_file parameter")
             return jsonify({
@@ -15280,8 +15951,7 @@ def foremost():
         input_file = params.get("input_file", "")
         output_dir = params.get("output_dir", "/tmp/foremost_output")
         file_types = params.get("file_types", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not input_file:
             logger.warning("📁 Foremost called without input_file parameter")
             return jsonify({
@@ -15322,8 +15992,7 @@ def steghide():
         embed_file = params.get("embed_file", "")
         passphrase = params.get("passphrase", "")
         output_file = params.get("output_file", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not cover_file:
             logger.warning("🖼️ Steghide called without cover_file parameter")
             return jsonify({
@@ -15369,8 +16038,7 @@ def exiftool():
         file_path = params.get("file_path", "")
         output_format = params.get("output_format", "")  # json, xml, csv
         tags = params.get("tags", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not file_path:
             logger.warning("📷 ExifTool called without file_path parameter")
             return jsonify({
@@ -15409,8 +16077,7 @@ def hashpump():
         data = params.get("data", "")
         key_length = params.get("key_length", "")
         append_data = params.get("append_data", "")
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not all([signature, data, key_length, append_data]):
             logger.warning("🔐 HashPump called without required parameters")
             return jsonify({
@@ -15457,8 +16124,7 @@ def hakrawler():
         robots = params.get("robots", True)
         sitemap = params.get("sitemap", True)
         wayback = params.get("wayback", False)
-        additional_args = params.get("additional_args", "")
-
+        additional_args = safe_additional_args(params.get("additional_args", ""))
         if not url:
             logger.warning("🕷️ Hakrawler called without URL parameter")
             return jsonify({
@@ -17260,6 +17926,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the HexStrike AI API Server")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--port", type=int, default=API_PORT, help=f"Port for the API server (default: {API_PORT})")
+    parser.add_argument("--host", type=str, default=API_HOST, help=f"Host interface to bind (default: {API_HOST}). Use 0.0.0.0 to expose on all interfaces (NOT RECOMMENDED — the API has no authentication).")
     args = parser.parse_args()
 
     if args.debug:
@@ -17268,6 +17935,9 @@ if __name__ == "__main__":
 
     if args.port != API_PORT:
         API_PORT = args.port
+
+    if args.host != API_HOST:
+        API_HOST = args.host
 
     # Enhanced startup messages with beautiful formatting
     startup_info = f"""
@@ -17286,4 +17956,19 @@ if __name__ == "__main__":
         if line.strip():
             logger.info(line)
 
-    app.run(host="0.0.0.0", port=API_PORT, debug=DEBUG_MODE)
+    # SECURITY: Warn loudly when binding to a non-loopback interface. The
+    # HexStrike API has no built-in authentication, so binding to 0.0.0.0 (or
+    # any externally reachable interface) exposes every endpoint — including
+    # arbitrary command execution helpers — to the network.
+    if API_HOST in ("0.0.0.0", "::", ""):
+        warning_msg = (
+            "⚠️  SECURITY WARNING: Binding to 0.0.0.0 exposes the unauthenticated "
+            "HexStrike API on all network interfaces. Anyone able to reach this "
+            "host can invoke every endpoint (including command execution). "
+            "Bind to 127.0.0.1 (the default) unless you have placed the server "
+            "behind an authenticating reverse proxy or firewall."
+        )
+        logger.warning(warning_msg)
+        print(f"\n{ModernVisualEngine.COLORS['CRITICAL']}{warning_msg}{ModernVisualEngine.COLORS['RESET']}\n")
+
+    app.run(host=API_HOST, port=API_PORT, debug=DEBUG_MODE, threaded=True)
