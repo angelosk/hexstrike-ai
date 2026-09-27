@@ -112,6 +112,9 @@ graph TD
 
 ## Installation
 
+> **Full setup guide (including macOS-specific steps, Claude Desktop config, and troubleshooting):**
+> **👉 [SETUP.md](SETUP.md)**
+
 ### Quick Setup to Run the hexstrike MCPs Server
 Many tools, such as nmap, require elevated privileges for certain features. To avoid granting permissions to each tool individually, perform the setup steps below as the `root` user.
 
@@ -126,6 +129,8 @@ source hexstrike-env/bin/activate  # Linux/Mac
 # hexstrike-env\Scripts\activate   # Windows
 
 # 3. Install Python dependencies
+#    macOS only: install unicorn pre-built wheel first to avoid cmake build errors
+#    pip install --only-binary=:all: unicorn
 pip3 install -r requirements.txt
 
 ```
