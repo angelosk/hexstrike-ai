@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import tempfile
+import shlex
 import subprocess
 import sys
 import traceback
@@ -10329,6 +10330,20 @@ def create_comprehensive_bugbounty_assessment():
 # SECURITY TOOLS API ENDPOINTS
 # ============================================================================
 
+def safe_shell_arg(value: str) -> str:
+    """Quote a single client-supplied value (target, URL, port list, wordlist
+    path, ...) for safe interpolation into a shell=True command string.
+
+    These endpoints build a command line by string interpolation rather than
+    passing an argv list to subprocess, so every value that isn't a fixed
+    flag chosen by this code must go through shlex.quote() before it reaches
+    the string. This does not cover an 'additional_args' style parameter
+    that is meant to carry multiple space-separated flags; that class of
+    parameter needs its own flag allowlist, not quoting, since quoting the
+    whole string would just pass it through as one broken argument.
+    """
+    return shlex.quote(str(value))
+
 @app.route("/api/tools/nmap", methods=["POST"])
 def nmap():
     """Execute nmap scan with enhanced logging, caching, and intelligent error handling"""
@@ -10349,12 +10364,12 @@ def nmap():
         command = f"nmap {scan_type}"
 
         if ports:
-            command += f" -p {ports}"
+            command += f" -p {safe_shell_arg(ports)}"
 
         if additional_args:
             command += f" {additional_args}"
 
-        command += f" {target}"
+        command += f" {safe_shell_arg(target)}"
 
         logger.info(f"🔍 Starting Nmap scan: {target}")
 
@@ -10403,7 +10418,7 @@ def gobuster():
                 "error": f"Invalid mode: {mode}. Must be one of: dir, dns, fuzz, vhost"
             }), 400
 
-        command = f"gobuster {mode} -u {url} -w {wordlist}"
+        command = f"gobuster {mode} -u {safe_shell_arg(url)} -w {safe_shell_arg(wordlist)}"
 
         if additional_args:
             command += f" {additional_args}"
