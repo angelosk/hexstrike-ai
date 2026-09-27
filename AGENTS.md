@@ -11,7 +11,7 @@ This repository ships the HexStrike MCP client and API server, plus local config
 ## Standard Workflow For Changes
 1. **Check upstream status first** with GitHub CLI:
    - `gh api repos/0x4m4/hexstrike-ai/commits/master --jq '{sha:.sha,date:.commit.author.date,message:.commit.message}'`
-   - `gh api repos/jlevydesigndev-glitch/hexstrike-ai/compare/master...0x4m4:master --jq '{status:.status,ahead_by:.ahead_by,behind_by:.behind_by,total_commits:.total_commits}'`
+   - `gh api repos/angelosk/hexstrike-ai/compare/master...0x4m4:master --jq '{status:.status,ahead_by:.ahead_by,behind_by:.behind_by,total_commits:.total_commits}'`
 2. **Review interface docs** before config changes:
    - `docs/interface_usage.md`
    - `hexstrike-tool-surface.json`
@@ -27,6 +27,16 @@ This repository ships the HexStrike MCP client and API server, plus local config
 - Prefer reconnaissance and planning tools before exploitation-oriented tools.
 - Do not run destructive, high-noise, or out-of-scope scans without explicit operator direction.
 - Keep legal authorization assumptions explicit in prompts and reports.
+
+## Environment & Security Controls (this fork)
+The server fails closed and several controls are env-driven. See `SECURITY.md` for the full posture.
+- `HEXSTRIKE_API_TOKEN` (**required**) — the server refuses to start without it; every request must send `X-HexStrike-Token`. The MCP client reads the same var and sends the header.
+- `HEXSTRIKE_ALLOW_RAW_EXEC` — `/api/command` and `/api/python/execute` return 403 unless set to `1` (issue #124).
+- `HEXSTRIKE_SCOPE_FILE` — restrict targets to authorized domains/CIDRs.
+- `HEXSTRIKE_AUDIT_LOG` — write an action audit log (JSONL).
+- `COMMAND_TIMEOUT` — seconds per tool run (default 300); raise for long scans (issue #84).
+- `HEXSTRIKE_ENABLED_TOOLS` / `HEXSTRIKE_DISABLED_TOOLS` — allow/deny lists (tool function name or binary) to trim the exposed MCP tool set when a host caps tool count (issue #119).
+- The API binds `127.0.0.1` by default; `/health` reports an `install_hint` for each missing tool (issue #120).
 
 ## Skill and Knowledge Sources
 - Use `docs/agent_skill_repos.md` as the current shortlist of external skill repositories and MCP security references.

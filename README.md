@@ -565,6 +565,37 @@ args = ["-X","utf8",
   "--server","http://127.0.0.1:8888"
 ]
 ```
+
+### Gemini CLI Integration
+
+With `hexstrike_server.py` running, register the MCP server in `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "hexstrike-ai": {
+      "command": "python3",
+      "args": ["/path/to/hexstrike-ai/hexstrike_mcp.py", "--server", "http://127.0.0.1:8888", "--lazy"],
+      "timeout": 300
+    }
+  }
+}
+```
+
+Set `HEXSTRIKE_API_TOKEN` in Gemini CLI's environment; it must match the token the HexStrike server was started with.
+
+### Open-WebUI Integration
+
+Open-WebUI consumes OpenAPI tool servers rather than MCP stdio directly, so front the MCP client with [`mcpo`](https://github.com/open-webui/mcpo) (the MCP-to-OpenAPI proxy):
+
+```bash
+# hexstrike_server.py must already be running on :8888
+export HEXSTRIKE_API_TOKEN=...   # same token the server was started with
+uvx mcpo --port 8000 -- python3 /path/to/hexstrike-ai/hexstrike_mcp.py --server http://127.0.0.1:8888 --lazy
+```
+
+Then in Open-WebUI go to **Settings → Tools** and add a tool server at `http://localhost:8000`. The tools appear as OpenAPI functions the model can call.
+
 ---
 
 ## Features

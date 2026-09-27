@@ -36,6 +36,20 @@ interpreter (`hexstrike-dev/bin/python3` on this machine); several venvs exist h
 
 There is **no test suite / linter config** in this repo. "Verification" means: start the server and hit `/health`, or call the `server_health` MCP tool. The many `if __name__ == "__main__":` blocks inside `hexstrike_server.py` are per-class self-test demos, not a runner.
 
+## Security controls & environment variables (this fork)
+
+The server **fails closed**: it exits at startup unless `HEXSTRIKE_API_TOKEN` is set, and every request must carry `X-HexStrike-Token` (global `before_request` gate). Key env vars:
+
+- `HEXSTRIKE_API_TOKEN` (**required**) — shared auth token; the MCP client sends it as `X-HexStrike-Token`.
+- `HEXSTRIKE_ALLOW_RAW_EXEC` — set `1` to enable `/api/command` and `/api/python/execute` (off by default; issue #124).
+- `HEXSTRIKE_SCOPE_FILE` — JSON scope file restricting targets to authorized domains/CIDRs.
+- `HEXSTRIKE_AUDIT_LOG` — path to a JSONL audit log.
+- `COMMAND_TIMEOUT` — seconds per tool run (default 300; issue #84).
+- `HEXSTRIKE_ENABLED_TOOLS` / `HEXSTRIKE_DISABLED_TOOLS` — comma/space-separated allow/deny lists (tool function name or binary) to trim the MCP tool set when a host caps tool count (issue #119).
+- `HEXSTRIKE_HTTPX_BIN` — absolute path to ProjectDiscovery httpx (avoids the pip `httpx[cli]` PATH collision).
+
+The API binds `127.0.0.1` by default (warns on `0.0.0.0`); `/health` includes an `install_hint` for each missing tool. Full posture: `SECURITY.md`.
+
 ## AI-client integration config
 
 The AI client (Claude Desktop/Code, Cursor, VS Code Copilot) launches the **MCP client** process itself — you do **not** run `hexstrike_mcp.py` by hand. Register it in the client's MCP config; the `--server` URL must point at the already-running Flask server.
