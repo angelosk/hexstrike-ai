@@ -1,12 +1,10 @@
-bin/
-hexstrike-env/
 hexstrike_env/
-__pycache__/
-*.pyc
-.vscode/
+hexstrike-env/
+.git/
 *.log
 *.jsonl
 *.pid
+__pycache__/
+*.pyc
 .DS_Store
 scope.json
-.env

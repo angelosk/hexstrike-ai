@@ -160,6 +160,17 @@ class HexStrikeClient:
         self.timeout = timeout
         self.session = requests.Session()
 
+        # The server has required auth (X-HexStrike-Token) since the
+        # security-hardening work — this client predates that and never
+        # sent it, meaning every single request would 401 silently.
+        # Fail-closed here rather than sending unauthenticated requests
+        # that are guaranteed to fail, matching the server's own posture.
+        api_token = os.environ.get("HEXSTRIKE_API_TOKEN")
+        if not api_token:
+            logger.error("❌ HEXSTRIKE_API_TOKEN is not set — the server will reject every request. Set it in the MCP client's env config.")
+        else:
+            self.session.headers.update({"X-HexStrike-Token": api_token})
+
         # Try to connect to server with retries
         # If running under an MCP host (stdio not attached to a TTY), skip HTTP health checks to avoid bootstrap delays.
         if sys.stdin.isatty() or sys.stdout.isatty():
@@ -167,8 +178,10 @@ class HexStrikeClient:
             for i in range(MAX_RETRIES):
                 try:
                     logger.info(f"🔗 Attempting to connect to HexStrike AI API at {server_url} (attempt {i+1}/{MAX_RETRIES})")
+                    # /ping, not /health — health runs a ~30s full tool-availability
+                    # sweep, which would stall startup; /ping is the fast liveness check.
                     try:
-                        test_response = self.session.get(f"{self.server_url}/health", timeout=5)
+                        test_response = self.session.get(f"{self.server_url}/ping", timeout=5)
                         test_response.raise_for_status()
                         health_check = test_response.json()
                         connected = True
