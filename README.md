@@ -390,7 +390,14 @@ curl -X POST http://localhost:8888/api/intelligence/analyze-target \
 
 ### Docker (recommended for real engagements)
 
-The included `Dockerfile` builds a self-contained image (Kali base + the core tool set + the Go-based recon tools) and isolates the server from your host filesystem. This is the safer path if you're pointing this at anything beyond your own lab — the server executes arbitrary commands (`/api/command`), so contain the blast radius rather than running it bare-metal.
+There are two supported images, for two different needs:
+
+- **Option A — lean single-container image** (this section): the root `Dockerfile`, a self-contained Kali image (core tool set + Go recon tools) that runs **non-root** with `setcap` on the raw-socket binaries and **no** `--privileged`. Best for per-engagement, blast-radius-contained runs.
+- **Option B — full stack with a vulnerability DB** (`docker compose`, further down): `docker/Dockerfile` plus bundled Clair + PostgreSQL for container/image scanning and an optional Metasploit DB. Heavier, and runs `--privileged` with host networking for maximum tool compatibility.
+
+#### Option A — lean single-container image
+
+The root `Dockerfile` isolates the server from your host filesystem. This is the safer path if you're pointing this at anything beyond your own lab — the server executes arbitrary commands (`/api/command`), so contain the blast radius rather than running it bare-metal.
 
 ```bash
 docker build -t hexstrike-ai:latest .
@@ -416,6 +423,20 @@ docker run -d --name hexstrike-acme-corp \
 Tool output and the audit log both land in `./engagements/acme-corp/workspace` on the host — inspectable, and gone (well, archived, not scanning) as soon as you `docker rm` the container. `--cap-add=NET_RAW --cap-add=NET_ADMIN` is what lets `nmap`/`masscan` do raw-socket scans (SYN scans etc.) despite the container running as a non-root user — the image doesn't grant that capability container-wide, it's set directly on those two binaries via `setcap`.
 
 The `0.0.0.0` bind you'll see if you inspect the image is intentional and not a contradiction of the loopback-only default described above — Docker's network namespace means it's harmless in isolation; the `-p 127.0.0.1:8888:8888` mapping is what actually determines host-level exposure, and that's loopback-only here too.
+
+#### Option B — full stack with a vulnerability DB (docker compose)
+
+`docker/docker-compose.yml` builds `docker/Dockerfile` (the full multi-stage image: Kali plus cloud tools like Prowler/Pacu/CloudMapper) and brings up two extra services — **Clair** and **PostgreSQL** — for container/image vulnerability scanning, with an optional Metasploit database. It runs `--privileged` with `network_mode: host` for maximum tool compatibility, so use it in a controlled environment, not on a shared host.
+
+```bash
+cd docker
+cp .env.example .env           # optional: pin HEXSTRIKE_API_TOKEN and other settings
+./start-docker-mcp-server.sh   # creates host dirs, then `docker compose up -d`
+```
+
+Auth token: set `HEXSTRIKE_API_TOKEN` in `docker/.env` for a stable value (recommended), or leave it unset and the container mints an ephemeral one and prints it to `docker logs` — use that as `X-HexStrike-Token` in your MCP client. The arbitrary command/code endpoints stay disabled unless you also set `HEXSTRIKE_ALLOW_RAW_EXEC=1` (issue #124).
+
+Rule of thumb: **Option A** for isolated per-engagement testing; **Option B** when you want the bundled vulnerability-scanning services and full cloud tool set.
 
 ---
 
