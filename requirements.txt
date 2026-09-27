@@ -83,3 +83,6 @@ pycparser<3.0                   # angr's CLexer wrapper breaks on pycparser 3.0'
 # 5. Browser Agent requires Chrome/Chromium and ChromeDriver installation
 #
 # For complete installation instructions and setup guides, see README.md
+
+# pinned for reproducibility - see CONTRIBUTING
+
