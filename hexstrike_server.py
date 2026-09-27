@@ -5780,6 +5780,9 @@ class PythonEnvironmentManager:
         """Install a package in the specified environment"""
         env_path = self.create_venv(env_name)
         pip_path = env_path / "bin" / "pip"
+        if not pip_path.exists():
+            # Windows uses Scripts\pip.exe
+            pip_path = env_path / "Scripts" / "pip.exe"
 
         try:
             result = subprocess.run([str(pip_path), "install", package],
@@ -5797,7 +5800,11 @@ class PythonEnvironmentManager:
     def get_python_path(self, env_name: str) -> str:
         """Get Python executable path for environment"""
         env_path = self.create_venv(env_name)
-        return str(env_path / "bin" / "python")
+        python_path = env_path / "bin" / "python"
+        if not python_path.exists():
+            # Windows
+            python_path = env_path / "Scripts" / "python.exe"
+        return str(python_path)
 
 # Global environment manager
 env_manager = PythonEnvironmentManager()
@@ -9127,14 +9134,15 @@ def health_check():
         password_tools + binary_tools + forensics_tools + cloud_tools +
         osint_tools + exploitation_tools + api_tools + wireless_tools + additional_tools
     )
-    tools_status = {}
 
-    for tool in all_tools:
-        try:
-            result = execute_command(f"which {tool}", use_cache=True)
-            tools_status[tool] = result["success"]
-        except:
-            tools_status[tool] = False
+    # Cache tools_status for 60s — shutil.which is fast but no need to repeat every call
+    import shutil as _shutil, time as _time
+    _cached = getattr(health_check, "_tools_cache", None)
+    if _cached and (_time.time() - _cached["ts"]) < 60:
+        tools_status = _cached["data"]
+    else:
+        tools_status = {tool: (_shutil.which(tool) is not None) for tool in all_tools}
+        setattr(health_check, "_tools_cache", {"data": tools_status, "ts": _time.time()})
 
     all_essential_tools_available = all(tools_status[tool] for tool in essential_tools)
 
@@ -17329,4 +17337,4 @@ if __name__ == "__main__":
         logger.warning(warning_msg)
         print(f"\n{ModernVisualEngine.COLORS['CRITICAL']}{warning_msg}{ModernVisualEngine.COLORS['RESET']}\n")
 
-    app.run(host=API_HOST, port=API_PORT, debug=DEBUG_MODE)
+    app.run(host=API_HOST, port=API_PORT, debug=DEBUG_MODE, threaded=True)
