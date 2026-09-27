@@ -27,6 +27,7 @@ import time
 from datetime import datetime
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 class HexStrikeColors:
     """Enhanced color palette matching the server's ModernVisualEngine.COLORS"""
@@ -372,7 +373,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # CORE NETWORK SCANNING TOOLS
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Nmap Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def nmap_scan(target: str, scan_type: str = "-sV", ports: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute an enhanced Nmap scan against a target with real-time logging.
@@ -415,7 +423,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Gobuster Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def gobuster_scan(url: str, mode: str = "dir", wordlist: str = "/usr/share/wordlists/dirb/common.txt", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Gobuster to find directories, DNS subdomains, or virtual hosts with enhanced logging.
@@ -459,7 +474,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Nuclei Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def nuclei_scan(target: str, severity: str = "", tags: str = "", template: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Nuclei vulnerability scanner with enhanced logging and real-time progress.
@@ -510,7 +532,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # CLOUD SECURITY TOOLS
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Prowler Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def prowler_scan(provider: str = "aws", profile: str = "default", region: str = "", checks: str = "", output_dir: str = "/tmp/prowler_output", output_format: str = "json", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Prowler for comprehensive cloud security assessment.
@@ -544,7 +573,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Prowler assessment failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Trivy Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def trivy_scan(scan_type: str = "image", target: str = "", output_format: str = "json", severity: str = "", output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Trivy for container and filesystem vulnerability scanning.
@@ -580,7 +616,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ENHANCED CLOUD AND CONTAINER SECURITY TOOLS (v6.0)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Scout Suite Assessment",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def scout_suite_assessment(provider: str = "aws", profile: str = "default",
                               report_dir: str = "/tmp/scout-suite", services: str = "",
                               exceptions: str = "", additional_args: str = "") -> Dict[str, Any]:
@@ -614,7 +657,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Scout Suite assessment failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Cloudmapper Analysis",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def cloudmapper_analysis(action: str = "collect", account: str = "",
                             config: str = "config.json", additional_args: str = "") -> Dict[str, Any]:
         """
@@ -643,7 +693,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ CloudMapper {action} failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Pacu Exploitation",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def pacu_exploitation(session_name: str = "hexstrike_session", modules: str = "",
                          data_services: str = "", regions: str = "",
                          additional_args: str = "") -> Dict[str, Any]:
@@ -675,7 +732,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Pacu exploitation failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Kube Hunter Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def kube_hunter_scan(target: str = "", remote: str = "", cidr: str = "",
                         interface: str = "", active: bool = False, report: str = "json",
                         additional_args: str = "") -> Dict[str, Any]:
@@ -711,7 +775,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ kube-hunter scan failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Kube Bench CIS",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def kube_bench_cis(targets: str = "", version: str = "", config_dir: str = "",
                       output_format: str = "json", additional_args: str = "") -> Dict[str, Any]:
         """
@@ -742,7 +813,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ kube-bench benchmark failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Docker Bench Security Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def docker_bench_security_scan(checks: str = "", exclude: str = "",
                                   output_file: str = "/tmp/docker-bench-results.json",
                                   additional_args: str = "") -> Dict[str, Any]:
@@ -772,7 +850,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Docker Bench Security failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Clair Vulnerability Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def clair_vulnerability_scan(image: str, config: str = "/etc/clair/config.yaml",
                                 output_format: str = "json", additional_args: str = "") -> Dict[str, Any]:
         """
@@ -801,7 +886,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Clair scan failed for {image}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Falco Runtime Monitoring",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def falco_runtime_monitoring(config_file: str = "/etc/falco/falco.yaml",
                                 rules_file: str = "", output_format: str = "json",
                                 duration: int = 60, additional_args: str = "") -> Dict[str, Any]:
@@ -833,7 +925,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Falco monitoring failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Checkov IAC Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def checkov_iac_scan(directory: str = ".", framework: str = "", check: str = "",
                         skip_check: str = "", output_format: str = "json",
                         additional_args: str = "") -> Dict[str, Any]:
@@ -867,7 +966,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Checkov scan failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Terrascan IAC Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def terrascan_iac_scan(scan_type: str = "all", iac_dir: str = ".",
                           policy_type: str = "", output_format: str = "json",
                           severity: str = "", additional_args: str = "") -> Dict[str, Any]:
@@ -905,7 +1011,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # FILE OPERATIONS & PAYLOAD GENERATION
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Create File",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def create_file(filename: str, content: str, binary: bool = False) -> Dict[str, Any]:
         """
         Create a file with specified content on the HexStrike server.
@@ -931,7 +1044,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to create file: {filename}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Modify File",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def modify_file(filename: str, content: str, append: bool = False) -> Dict[str, Any]:
         """
         Modify an existing file on the HexStrike server.
@@ -957,7 +1077,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to modify file: {filename}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Delete File",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def delete_file(filename: str) -> Dict[str, Any]:
         """
         Delete a file or directory on the HexStrike server.
@@ -979,7 +1106,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to delete file: {filename}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="List Files",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def list_files(directory: str = ".") -> Dict[str, Any]:
         """
         List files in a directory on the HexStrike server.
@@ -999,7 +1133,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to list files in {directory}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Generate Payload",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def generate_payload(payload_type: str = "buffer", size: int = 1024, pattern: str = "A", filename: str = "") -> Dict[str, Any]:
         """
         Generate large payloads for testing and exploitation.
@@ -1033,7 +1174,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # PYTHON ENVIRONMENT MANAGEMENT
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Install Python Package",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def install_python_package(package: str, env_name: str = "default") -> Dict[str, Any]:
         """
         Install a Python package in a virtual environment on the HexStrike server.
@@ -1057,7 +1205,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to install package {package}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Execute Python Script",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def execute_python_script(script: str, env_name: str = "default", filename: str = "") -> Dict[str, Any]:
         """
         Execute a Python script in a virtual environment on the HexStrike server.
@@ -1089,7 +1244,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ADDITIONAL SECURITY TOOLS FROM ORIGINAL IMPLEMENTATION
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Dirb Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def dirb_scan(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Dirb for directory brute forcing with enhanced logging.
@@ -1115,7 +1277,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Dirb scan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Nikto Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def nikto_scan(target: str, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Nikto web vulnerability scanner with enhanced logging.
@@ -1139,7 +1308,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Nikto scan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Sqlmap Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def sqlmap_scan(url: str, data: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute SQLMap for SQL injection testing with enhanced logging.
@@ -1165,7 +1341,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ SQLMap scan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Metasploit Run",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def metasploit_run(module: str, options: Dict[str, Any] = {}) -> Dict[str, Any]:
         """
         Execute a Metasploit module with enhanced logging.
@@ -1189,7 +1372,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Metasploit module failed: {module}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Hydra Attack",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def hydra_attack(
         target: str,
         service: str,
@@ -1231,7 +1421,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Hydra attack failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="John Crack",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def john_crack(
         hash_file: str,
         wordlist: str = "/usr/share/wordlists/rockyou.txt",
@@ -1264,7 +1461,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ John the Ripper failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Wpscan Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def wpscan_analyze(url: str, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute WPScan for WordPress vulnerability scanning with enhanced logging.
@@ -1288,7 +1492,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ WPScan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Enum4linux Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def enum4linux_scan(target: str, additional_args: str = "-a") -> Dict[str, Any]:
         """
         Execute Enum4linux for SMB enumeration with enhanced logging.
@@ -1312,7 +1523,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Enum4linux failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Ffuf Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ffuf_scan(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt", mode: str = "directory", match_codes: str = "200,204,301,302,307,401,403", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute FFuf for web fuzzing with enhanced logging.
@@ -1342,7 +1560,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ FFuf fuzzing failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Netexec Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def netexec_scan(target: str, protocol: str = "smb", username: str = "", password: str = "", hash_value: str = "", module: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute NetExec (formerly CrackMapExec) for network enumeration with enhanced logging.
@@ -1376,7 +1601,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ NetExec scan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Amass Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def amass_scan(domain: str, mode: str = "enum", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Amass for subdomain enumeration with enhanced logging.
@@ -1402,7 +1634,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Amass failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Hashcat Crack",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def hashcat_crack(hash_file: str, hash_type: str, attack_mode: str = "0", wordlist: str = "/usr/share/wordlists/rockyou.txt", mask: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Hashcat for advanced password cracking with enhanced logging.
@@ -1434,7 +1673,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Hashcat attack failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Subfinder Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def subfinder_scan(domain: str, silent: bool = True, all_sources: bool = False, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Subfinder for passive subdomain enumeration with enhanced logging.
@@ -1462,7 +1708,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Subfinder failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Smbmap Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def smbmap_scan(target: str, username: str = "", password: str = "", domain: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute SMBMap for SMB share enumeration with enhanced logging.
@@ -1496,7 +1749,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ENHANCED NETWORK PENETRATION TESTING TOOLS (v6.0)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Rustscan Fast Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def rustscan_fast_scan(target: str, ports: str = "", ulimit: int = 5000,
                           batch_size: int = 4500, timeout: int = 1500,
                           scripts: bool = False, additional_args: str = "") -> Dict[str, Any]:
@@ -1532,7 +1792,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Rustscan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Masscan High Speed",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def masscan_high_speed(target: str, ports: str = "1-65535", rate: int = 1000,
                           interface: str = "", router_mac: str = "", source_ip: str = "",
                           banners: bool = False, additional_args: str = "") -> Dict[str, Any]:
@@ -1570,7 +1837,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Masscan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Nmap Advanced Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def nmap_advanced_scan(target: str, scan_type: str = "-sS", ports: str = "",
                           timing: str = "T4", nse_scripts: str = "", os_detection: bool = False,
                           version_detection: bool = False, aggressive: bool = False,
@@ -1613,7 +1887,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Advanced Nmap failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Autorecon Comprehensive",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def autorecon_comprehensive(target: str, output_dir: str = "/tmp/autorecon",
                                port_scans: str = "top-100-ports", service_scans: str = "default",
                                heartbeat: int = 60, timeout: int = 300,
@@ -1650,7 +1931,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ AutoRecon failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Enum4linux NG Advanced",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def enum4linux_ng_advanced(target: str, username: str = "", password: str = "",
                                domain: str = "", shares: bool = True, users: bool = True,
                                groups: bool = True, policy: bool = True,
@@ -1691,7 +1979,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Enum4linux-ng failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Rpcclient Enumeration",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def rpcclient_enumeration(target: str, username: str = "", password: str = "",
                              domain: str = "", commands: str = "enumdomusers;enumdomgroups;querydominfo",
                              additional_args: str = "") -> Dict[str, Any]:
@@ -1725,7 +2020,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ rpcclient failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Nbtscan Netbios",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def nbtscan_netbios(target: str, verbose: bool = False, timeout: int = 2,
                        additional_args: str = "") -> Dict[str, Any]:
         """
@@ -1754,7 +2056,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ nbtscan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="ARP Scan Discovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def arp_scan_discovery(target: str = "", interface: str = "", local_network: bool = False,
                           timeout: int = 500, retry: int = 3, additional_args: str = "") -> Dict[str, Any]:
         """
@@ -1787,7 +2096,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ arp-scan failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Responder Credential Harvest",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def responder_credential_harvest(interface: str = "eth0", analyze: bool = False,
                                    wpad: bool = True, force_wpad_auth: bool = False,
                                    fingerprint: bool = False, duration: int = 300,
@@ -1824,7 +2140,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Responder failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Volatility Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def volatility_analyze(memory_file: str, plugin: str, profile: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Volatility for memory forensics analysis with enhanced logging.
@@ -1852,7 +2175,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Volatility analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Msfvenom Generate",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def msfvenom_generate(payload: str, format_type: str = "", output_file: str = "", encoder: str = "", iterations: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute MSFVenom for payload generation with enhanced logging.
@@ -1888,7 +2218,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # BINARY ANALYSIS & REVERSE ENGINEERING TOOLS
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="GDB Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def gdb_analyze(binary: str, commands: str = "", script_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute GDB for binary analysis and debugging with enhanced logging.
@@ -1916,7 +2253,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ GDB analysis failed for {binary}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Radare2 Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def radare2_analyze(binary: str, commands: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Radare2 for binary analysis and reverse engineering with enhanced logging.
@@ -1942,7 +2286,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Radare2 analysis failed for {binary}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Binwalk Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def binwalk_analyze(file_path: str, extract: bool = False, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Binwalk for firmware and file analysis with enhanced logging.
@@ -1968,7 +2319,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Binwalk analysis failed for {file_path}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Ropgadget Search",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ropgadget_search(binary: str, gadget_type: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Search for ROP gadgets in a binary using ROPgadget with enhanced logging.
@@ -1994,7 +2352,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ ROPgadget search failed for {binary}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Checksec Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def checksec_analyze(binary: str) -> Dict[str, Any]:
         """
         Check security features of a binary with enhanced logging.
@@ -2016,7 +2381,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Checksec analysis failed for {binary}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="XXD Hexdump",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def xxd_hexdump(file_path: str, offset: str = "0", length: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Create a hex dump of a file using xxd with enhanced logging.
@@ -2044,7 +2416,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ XXD hex dump failed for {file_path}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Strings Extract",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def strings_extract(file_path: str, min_len: int = 4, additional_args: str = "") -> Dict[str, Any]:
         """
         Extract strings from a binary file with enhanced logging.
@@ -2070,7 +2449,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Strings extraction failed for {file_path}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Objdump Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def objdump_analyze(binary: str, disassemble: bool = True, additional_args: str = "") -> Dict[str, Any]:
         """
         Analyze a binary using objdump with enhanced logging.
@@ -2100,7 +2486,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ENHANCED BINARY ANALYSIS AND EXPLOITATION FRAMEWORK (v6.0)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Ghidra Analysis",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ghidra_analysis(binary: str, project_name: str = "hexstrike_analysis",
                        script_file: str = "", analysis_timeout: int = 300,
                        output_format: str = "xml", additional_args: str = "") -> Dict[str, Any]:
@@ -2134,7 +2527,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Ghidra analysis failed for {binary}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Pwntools Exploit",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def pwntools_exploit(script_content: str = "", target_binary: str = "",
                         target_host: str = "", target_port: int = 0,
                         exploit_type: str = "local", additional_args: str = "") -> Dict[str, Any]:
@@ -2168,7 +2568,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Pwntools exploit failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="One Gadget Search",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def one_gadget_search(libc_path: str, level: int = 1, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute one_gadget to find one-shot RCE gadgets in libc.
@@ -2194,7 +2601,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ one_gadget analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Libc Database Lookup",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def libc_database_lookup(action: str = "find", symbols: str = "",
                             libc_id: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2223,7 +2637,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ libc-database {action} failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="GDB Peda Debug",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def gdb_peda_debug(binary: str = "", commands: str = "", attach_pid: int = 0,
                       core_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2254,7 +2675,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ GDB-PEDA analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Angr Symbolic Execution",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def angr_symbolic_execution(binary: str, script_content: str = "",
                                find_address: str = "", avoid_addresses: str = "",
                                analysis_type: str = "symbolic", additional_args: str = "") -> Dict[str, Any]:
@@ -2288,7 +2716,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ angr analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Ropper Gadget Search",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ropper_gadget_search(binary: str, gadget_type: str = "rop", quality: int = 1,
                             arch: str = "", search_string: str = "",
                             additional_args: str = "") -> Dict[str, Any]:
@@ -2322,7 +2757,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ ropper analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Pwninit Setup",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def pwninit_setup(binary: str, libc: str = "", ld: str = "",
                      template_type: str = "python", additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2353,7 +2795,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ pwninit setup failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Feroxbuster Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def feroxbuster_scan(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt", threads: int = 10, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Feroxbuster for recursive content discovery with enhanced logging.
@@ -2381,7 +2830,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Feroxbuster scan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Dotdotpwn Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def dotdotpwn_scan(target: str, module: str = "http", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute DotDotPwn for directory traversal testing with enhanced logging.
@@ -2407,7 +2863,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ DotDotPwn scan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Xsser Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def xsser_scan(url: str, params: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute XSSer for XSS vulnerability testing with enhanced logging.
@@ -2433,7 +2896,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ XSSer scan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Wfuzz Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def wfuzz_scan(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Wfuzz for web application fuzzing with enhanced logging.
@@ -2463,7 +2933,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ENHANCED WEB APPLICATION SECURITY TOOLS (v6.0)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Dirsearch Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def dirsearch_scan(url: str, extensions: str = "php,html,js,txt,xml,json",
                       wordlist: str = "/usr/share/wordlists/dirsearch/common.txt",
                       threads: int = 30, recursive: bool = False, additional_args: str = "") -> Dict[str, Any]:
@@ -2497,7 +2974,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Dirsearch scan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Katana Crawl",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def katana_crawl(url: str, depth: int = 3, js_crawl: bool = True,
                     form_extraction: bool = True, output_format: str = "json",
                     additional_args: str = "") -> Dict[str, Any]:
@@ -2531,7 +3015,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Katana crawl failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Gau Discovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def gau_discovery(domain: str, providers: str = "wayback,commoncrawl,otx,urlscan",
                      include_subs: bool = True, blacklist: str = "png,jpg,gif,jpeg,swf,woff,svg,pdf,css,ico",
                      additional_args: str = "") -> Dict[str, Any]:
@@ -2563,7 +3054,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Gau URL discovery failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Waybackurls Discovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def waybackurls_discovery(domain: str, get_versions: bool = False,
                              no_subs: bool = False, additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2592,7 +3090,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Waybackurls discovery failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Arjun Parameter Discovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def arjun_parameter_discovery(url: str, method: str = "GET", wordlist: str = "",
                                  delay: int = 0, threads: int = 25, stable: bool = False,
                                  additional_args: str = "") -> Dict[str, Any]:
@@ -2628,7 +3133,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Arjun parameter discovery failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Paramspider Mining",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def paramspider_mining(domain: str, level: int = 2,
                           exclude: str = "png,jpg,gif,jpeg,swf,woff,svg,pdf,css,ico",
                           output: str = "", additional_args: str = "") -> Dict[str, Any]:
@@ -2660,7 +3172,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ ParamSpider mining failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="X8 Parameter Discovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def x8_parameter_discovery(url: str, wordlist: str = "/usr/share/wordlists/x8/params.txt",
                               method: str = "GET", body: str = "", headers: str = "",
                               additional_args: str = "") -> Dict[str, Any]:
@@ -2694,7 +3213,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ x8 parameter discovery failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Jaeles Vulnerability Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def jaeles_vulnerability_scan(url: str, signatures: str = "", config: str = "",
                                  threads: int = 20, timeout: int = 20,
                                  additional_args: str = "") -> Dict[str, Any]:
@@ -2728,7 +3254,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Jaeles vulnerability scan failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Dalfox XSS Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def dalfox_xss_scan(url: str, pipe_mode: bool = False, blind: bool = False,
                        mining_dom: bool = True, mining_dict: bool = True,
                        custom_payload: str = "", additional_args: str = "") -> Dict[str, Any]:
@@ -2764,7 +3297,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Dalfox XSS scan failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Httpx Probe",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def httpx_probe(target: str, probe: bool = True, tech_detect: bool = False,
                    status_code: bool = False, content_length: bool = False,
                    title: bool = False, web_server: bool = False, threads: int = 50,
@@ -2805,7 +3345,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ httpx probe failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Anew Data Processing",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def anew_data_processing(input_data: str, output_file: str = "",
                             additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2832,7 +3379,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error("❌ anew data processing failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Qsreplace Parameter Replacement",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def qsreplace_parameter_replacement(urls: str, replacement: str = "FUZZ",
                                        additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2859,7 +3413,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error("❌ qsreplace parameter replacement failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Uro URL Filtering",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def uro_url_filtering(urls: str, whitelist: str = "", blacklist: str = "",
                          additional_args: str = "") -> Dict[str, Any]:
         """
@@ -2892,7 +3453,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # AI-POWERED PAYLOAD GENERATION (v5.0 ENHANCEMENT)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="AI Generate Payload",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ai_generate_payload(attack_type: str, complexity: str = "basic", technology: str = "", url: str = "") -> Dict[str, Any]:
         """
         Generate AI-powered contextual payloads for security testing.
@@ -2933,7 +3501,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="AI Test Payload",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ai_test_payload(payload: str, target_url: str, method: str = "GET") -> Dict[str, Any]:
         """
         Test generated payload against target with AI analysis.
@@ -2968,7 +3543,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="AI Generate Attack Suite",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ai_generate_attack_suite(target_url: str, attack_types: str = "xss,sqli,lfi") -> Dict[str, Any]:
         """
         Generate comprehensive attack suite with multiple payload types.
@@ -3029,7 +3611,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ADVANCED API TESTING TOOLS (v5.0 ENHANCEMENT)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="API Fuzzer",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def api_fuzzer(base_url: str, endpoints: str = "", methods: str = "GET,POST,PUT,DELETE", wordlist: str = "/usr/share/wordlists/api/api-endpoints.txt") -> Dict[str, Any]:
         """
         Advanced API endpoint fuzzing with intelligent parameter discovery.
@@ -3065,7 +3654,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Graphql Scanner",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def graphql_scanner(endpoint: str, introspection: bool = True, query_depth: int = 10, test_mutations: bool = True) -> Dict[str, Any]:
         """
         Advanced GraphQL security scanning and introspection.
@@ -3107,7 +3703,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="JWT Analyzer",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def jwt_analyzer(jwt_token: str, target_url: str = "") -> Dict[str, Any]:
         """
         Advanced JWT token analysis and vulnerability testing.
@@ -3146,7 +3749,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="API Schema Analyzer",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def api_schema_analyzer(schema_url: str, schema_type: str = "openapi") -> Dict[str, Any]:
         """
         Analyze API schemas and identify potential security issues.
@@ -3191,7 +3801,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Comprehensive API Audit",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def comprehensive_api_audit(base_url: str, schema_url: str = "", jwt_token: str = "", graphql_endpoint: str = "") -> Dict[str, Any]:
         """
         Comprehensive API security audit combining multiple testing techniques.
@@ -3289,7 +3906,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ADVANCED CTF TOOLS (v5.0 ENHANCEMENT)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Volatility3 Analyze",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def volatility3_analyze(memory_file: str, plugin: str, output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Volatility3 for advanced memory forensics with enhanced logging.
@@ -3317,7 +3941,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Volatility3 analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Foremost Carving",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def foremost_carving(input_file: str, output_dir: str = "/tmp/foremost_output", file_types: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Foremost for file carving with enhanced logging.
@@ -3345,7 +3976,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Foremost carving failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Steghide Analysis",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def steghide_analysis(action: str, cover_file: str, embed_file: str = "", passphrase: str = "", output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Steghide for steganography analysis with enhanced logging.
@@ -3377,7 +4015,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Steghide {action} failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Exiftool Extract",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def exiftool_extract(file_path: str, output_format: str = "", tags: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute ExifTool for metadata extraction with enhanced logging.
@@ -3405,7 +4050,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ ExifTool analysis failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Hashpump Attack",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def hashpump_attack(signature: str, data: str, key_length: str, append_data: str, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute HashPump for hash length extension attacks with enhanced logging.
@@ -3439,7 +4091,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # BUG BOUNTY RECONNAISSANCE TOOLS (v5.0 ENHANCEMENT)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Hakrawler Crawl",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def hakrawler_crawl(url: str, depth: int = 2, forms: bool = True, robots: bool = True, sitemap: bool = True, wayback: bool = False, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Hakrawler for web endpoint discovery with enhanced logging.
@@ -3480,7 +4139,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Hakrawler crawling failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Httpx Probe",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def httpx_probe(targets: str = "", target_file: str = "", ports: str = "", methods: str = "GET", status_code: str = "", content_length: bool = False, output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute HTTPx for HTTP probing with enhanced logging.
@@ -3516,7 +4182,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ HTTPx probing failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Paramspider Discovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def paramspider_discovery(domain: str, exclude: str = "", output_file: str = "", level: int = 2, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute ParamSpider for parameter discovery with enhanced logging.
@@ -3550,7 +4223,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ADVANCED WEB SECURITY TOOLS CONTINUED
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Burpsuite Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def burpsuite_scan(project_file: str = "", config_file: str = "", target: str = "", headless: bool = False, scan_type: str = "", scan_config: str = "", output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Burp Suite with enhanced logging.
@@ -3586,7 +4266,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Burp Suite scan failed")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="ZAP Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def zap_scan(target: str = "", scan_type: str = "baseline", api_key: str = "", daemon: bool = False, port: str = "8090", host: str = "0.0.0.0", format_type: str = "xml", output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute OWASP ZAP with enhanced logging.
@@ -3624,7 +4311,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ ZAP scan failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Arjun Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def arjun_scan(url: str, method: str = "GET", data: str = "", headers: str = "", timeout: str = "", output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute Arjun for parameter discovery with enhanced logging.
@@ -3658,7 +4352,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Arjun failed for {url}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Wafw00f Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def wafw00f_scan(target: str, additional_args: str = "") -> Dict[str, Any]:
         """
         Execute wafw00f to identify and fingerprint WAF products with enhanced logging.
@@ -3682,7 +4383,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Wafw00f failed for {target}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Fierce Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def fierce_scan(domain: str, dns_server: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute fierce for DNS reconnaissance with enhanced logging.
@@ -3708,7 +4416,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Fierce failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Dnsenum Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def dnsenum_scan(domain: str, dns_server: str = "", wordlist: str = "", additional_args: str = "") -> Dict[str, Any]:
         """
         Execute dnsenum for DNS enumeration with enhanced logging.
@@ -3736,7 +4451,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ DNSenum failed for {domain}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Autorecon Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def autorecon_scan(
         target: str = "",
         target_file: str = "",
@@ -3878,7 +4600,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # SYSTEM MONITORING & TELEMETRY
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Server Health",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def server_health() -> Dict[str, Any]:
         """
         Check the health status of the HexStrike AI server.
@@ -3894,7 +4623,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.warning(f"⚠️  Server health check returned: {result.get('status', 'unknown')}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Cache Stats",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def get_cache_stats() -> Dict[str, Any]:
         """
         Get cache statistics from the HexStrike AI server.
@@ -3908,7 +4644,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.info(f"📊 Cache hit rate: {result.get('hit_rate', 'unknown')}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Clear Cache",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def clear_cache() -> Dict[str, Any]:
         """
         Clear the cache on the HexStrike AI server.
@@ -3924,7 +4667,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to clear cache")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Telemetry",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def get_telemetry() -> Dict[str, Any]:
         """
         Get system telemetry from the HexStrike AI server.
@@ -3942,7 +4692,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # PROCESS MANAGEMENT TOOLS (v5.0 ENHANCEMENT)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="List Active Processes",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def list_active_processes() -> Dict[str, Any]:
         """
         List all active processes on the HexStrike AI server.
@@ -3958,7 +4715,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error("❌ Failed to list processes")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Process Status",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def get_process_status(pid: int) -> Dict[str, Any]:
         """
         Get the status of a specific process.
@@ -3977,7 +4741,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Process {pid} not found or error occurred")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Terminate Process",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def terminate_process(pid: int) -> Dict[str, Any]:
         """
         Terminate a specific running process.
@@ -3996,7 +4767,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to terminate process {pid}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Pause Process",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def pause_process(pid: int) -> Dict[str, Any]:
         """
         Pause a specific running process.
@@ -4015,7 +4793,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to pause process {pid}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Resume Process",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def resume_process(pid: int) -> Dict[str, Any]:
         """
         Resume a paused process.
@@ -4034,7 +4819,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to resume process {pid}")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Process Dashboard",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def get_process_dashboard() -> Dict[str, Any]:
         """
         Get enhanced process dashboard with visual status indicators.
@@ -4057,7 +4849,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error("❌ Failed to get process dashboard")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Execute Command",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def execute_command(command: str, use_cache: bool = True) -> Dict[str, Any]:
         """
         Execute an arbitrary command on the HexStrike AI server with enhanced logging.
@@ -4101,7 +4900,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ADVANCED VULNERABILITY INTELLIGENCE MCP TOOLS (v6.0 ENHANCEMENT)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Monitor CVE Feeds",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def monitor_cve_feeds(hours: int = 24, severity_filter: str = "HIGH,CRITICAL", keywords: str = "") -> Dict[str, Any]:
         """
         Monitor CVE databases for new vulnerabilities with AI analysis.
@@ -4132,7 +4938,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Generate Exploit From CVE",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def generate_exploit_from_cve(cve_id: str, target_os: str = "", target_arch: str = "x64", exploit_type: str = "poc", evasion_level: str = "none") -> Dict[str, Any]:
         """
         Generate working exploits from CVE information using AI-powered analysis.
@@ -4171,7 +4984,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Discover Attack Chains",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def discover_attack_chains(target_software: str, attack_depth: int = 3, include_zero_days: bool = False) -> Dict[str, Any]:
         """
         Discover multi-stage attack chains for target software with vulnerability correlation.
@@ -4205,7 +5025,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Research Zero Day Opportunities",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def research_zero_day_opportunities(target_software: str, analysis_depth: str = "standard", source_code_url: str = "") -> Dict[str, Any]:
         """
         Automated zero-day vulnerability research using AI analysis and pattern recognition.
@@ -4242,7 +5069,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Correlate Threat Intelligence",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def correlate_threat_intelligence(indicators: str, timeframe: str = "30d", sources: str = "all") -> Dict[str, Any]:
         """
         Correlate threat intelligence across multiple sources with advanced analysis.
@@ -4288,7 +5122,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Advanced Payload Generation",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def advanced_payload_generation(attack_type: str, target_context: str = "", evasion_level: str = "standard", custom_constraints: str = "") -> Dict[str, Any]:
         """
         Generate advanced payloads with AI-powered evasion techniques and contextual adaptation.
@@ -4336,7 +5177,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Vulnerability Intelligence Dashboard",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def vulnerability_intelligence_dashboard() -> Dict[str, Any]:
         """
         Get a comprehensive vulnerability intelligence dashboard with latest threats and trends.
@@ -4390,7 +5238,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             "dashboard": dashboard
         }
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Threat Hunting Assistant",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def threat_hunting_assistant(target_environment: str, threat_indicators: str = "", hunt_focus: str = "general") -> Dict[str, Any]:
         """
         AI-powered threat hunting assistant with vulnerability correlation and attack simulation.
@@ -4500,7 +5355,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ENHANCED VISUAL OUTPUT TOOLS
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Get Live Dashboard",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def get_live_dashboard() -> Dict[str, Any]:
         """
         Get a beautiful live dashboard showing all active processes with enhanced visual formatting.
@@ -4516,7 +5378,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error("❌ Failed to retrieve live dashboard")
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Create Vulnerability Report",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def create_vulnerability_report(vulnerabilities: str, target: str = "", scan_type: str = "comprehensive") -> Dict[str, Any]:
         """
         Create a beautiful vulnerability report with severity-based styling and visual indicators.
@@ -4570,7 +5439,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.error(f"❌ Failed to create vulnerability report: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Format Tool Output Visual",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def format_tool_output_visual(tool_name: str, output: str, success: bool = True) -> Dict[str, Any]:
         """
         Format tool output with beautiful visual styling, syntax highlighting, and structure.
@@ -4599,7 +5475,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Create Scan Summary",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def create_scan_summary(target: str, tools_used: str, vulnerabilities_found: int = 0,
                            execution_time: float = 0.0, findings: str = "") -> Dict[str, Any]:
         """
@@ -4635,7 +5518,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Display System Metrics",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def display_system_metrics() -> Dict[str, Any]:
         """
         Display current system metrics and performance indicators with visual formatting.
@@ -4684,7 +5574,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # INTELLIGENT DECISION ENGINE TOOLS
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Analyze Target Intelligence",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def analyze_target_intelligence(target: str) -> Dict[str, Any]:
         """
         Analyze target using AI-powered intelligence to create comprehensive profile.
@@ -4708,7 +5605,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Select Optimal Tools AI",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def select_optimal_tools_ai(target: str, objective: str = "comprehensive") -> Dict[str, Any]:
         """
         Use AI to select optimal security tools based on target analysis and testing objective.
@@ -4736,7 +5640,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Optimize Tool Parameters AI",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def optimize_tool_parameters_ai(target: str, tool: str, context: str = "{}") -> Dict[str, Any]:
         """
         Use AI to optimize tool parameters based on target profile and context.
@@ -4773,7 +5684,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Create Attack Chain AI",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def create_attack_chain_ai(target: str, objective: str = "comprehensive") -> Dict[str, Any]:
         """
         Create an intelligent attack chain using AI-driven tool sequencing and optimization.
@@ -4805,7 +5723,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Intelligent Smart Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def intelligent_smart_scan(target: str, objective: str = "comprehensive", max_tools: int = 5) -> Dict[str, Any]:
         """
         Execute an intelligent scan using AI-driven tool selection and parameter optimization.
@@ -4858,7 +5783,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Detect Technologies AI",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def detect_technologies_ai(target: str) -> Dict[str, Any]:
         """
         Use AI to detect technologies and provide technology-specific testing recommendations.
@@ -4890,7 +5822,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="AI Reconnaissance Workflow",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ai_reconnaissance_workflow(target: str, depth: str = "standard") -> Dict[str, Any]:
         """
         Execute AI-driven reconnaissance workflow with intelligent tool chaining.
@@ -4939,7 +5878,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             "timestamp": datetime.now().isoformat()
         }
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="AI Vulnerability Assessment",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def ai_vulnerability_assessment(target: str, focus_areas: str = "all") -> Dict[str, Any]:
         """
         Perform AI-driven vulnerability assessment with intelligent prioritization.
@@ -4999,7 +5945,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # BUG BOUNTY HUNTING SPECIALIZED WORKFLOWS
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty Reconnaissance Workflow",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_reconnaissance_workflow(domain: str, scope: str = "", out_of_scope: str = "",
                                         program_type: str = "web") -> Dict[str, Any]:
         """
@@ -5032,7 +5985,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty Vulnerability Hunting",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_vulnerability_hunting(domain: str, priority_vulns: str = "rce,sqli,xss,idor,ssrf",
                                        bounty_range: str = "unknown") -> Dict[str, Any]:
         """
@@ -5063,7 +6023,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty Business Logic Testing",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_business_logic_testing(domain: str, program_type: str = "web") -> Dict[str, Any]:
         """
         Create business logic testing workflow for advanced bug bounty hunting.
@@ -5092,7 +6059,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty OSINT Gathering",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_osint_gathering(domain: str) -> Dict[str, Any]:
         """
         Create OSINT (Open Source Intelligence) gathering workflow for bug bounty reconnaissance.
@@ -5117,7 +6091,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty File Upload Testing",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_file_upload_testing(target_url: str) -> Dict[str, Any]:
         """
         Create file upload vulnerability testing workflow with bypass techniques.
@@ -5142,7 +6123,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty Comprehensive Assessment",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_comprehensive_assessment(domain: str, scope: str = "",
                                          priority_vulns: str = "rce,sqli,xss,idor,ssrf",
                                          include_osint: bool = True,
@@ -5180,7 +6168,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Bugbounty Authentication Bypass Testing",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def bugbounty_authentication_bypass_testing(target_url: str, auth_type: str = "form") -> Dict[str, Any]:
         """
         Create authentication bypass testing workflow for bug bounty hunting.
@@ -5245,7 +6240,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     # ENHANCED HTTP TESTING FRAMEWORK & BROWSER AGENT (BURP SUITE ALTERNATIVE)
     # ============================================================================
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="HTTP Framework Test",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def http_framework_test(url: str, method: str = "GET", data: dict = {},
                            headers: dict = {}, cookies: dict = {}, action: str = "request") -> Dict[str, Any]:
         """
@@ -5286,7 +6288,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Browser Agent Inspect",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def browser_agent_inspect(url: str, headless: bool = True, wait_time: int = 5,
                              action: str = "navigate", proxy_port: int = None, active_tests: bool = False) -> Dict[str, Any]:
         """
@@ -5334,26 +6343,54 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
         return result
 
     # ---------------- Additional HTTP Framework Tools (sync with server) ----------------
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="HTTP Set Rules",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def http_set_rules(rules: list) -> Dict[str, Any]:
         """Set match/replace rules used to rewrite parts of URL/query/headers/body before sending.
         Rule format: {'where':'url|query|headers|body','pattern':'regex','replacement':'string'}"""
         payload = {"action": "set_rules", "rules": rules}
         return hexstrike_client.safe_post("api/tools/http-framework", payload)
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="HTTP Set Scope",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def http_set_scope(host: str, include_subdomains: bool = True) -> Dict[str, Any]:
         """Define in-scope host (and optionally subdomains) so out-of-scope requests are skipped."""
         payload = {"action": "set_scope", "host": host, "include_subdomains": include_subdomains}
         return hexstrike_client.safe_post("api/tools/http-framework", payload)
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="HTTP Repeater",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def http_repeater(request_spec: dict) -> Dict[str, Any]:
         """Send a crafted request (Burp Repeater equivalent). request_spec keys: url, method, headers, cookies, data."""
         payload = {"action": "repeater", "request": request_spec}
         return hexstrike_client.safe_post("api/tools/http-framework", payload)
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="HTTP Intruder",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def http_intruder(url: str, method: str = "GET", location: str = "query", params: list = None,
                       payloads: list = None, base_data: dict = None, max_requests: int = 100) -> Dict[str, Any]:
         """Simple Intruder (sniper) fuzzing. Iterates payloads over each param individually.
@@ -5370,7 +6407,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
         }
         return hexstrike_client.safe_post("api/tools/http-framework", payload)
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Burpsuite Alternative Scan",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def burpsuite_alternative_scan(target: str, scan_type: str = "comprehensive",
                                   headless: bool = True, max_depth: int = 3,
                                   max_pages: int = 50) -> Dict[str, Any]:
@@ -5431,7 +6475,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Error Handling Statistics",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def error_handling_statistics() -> Dict[str, Any]:
         """
         Get intelligent error handling system statistics and recent error patterns.
@@ -5462,7 +6513,14 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
 
         return result
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Test Error Recovery",
+            readOnlyHint=False,
+            destructiveHint=True,
+            openWorldHint=True,
+        ),
+    )
     def test_error_recovery(tool_name: str, error_type: str = "timeout",
                            target: str = "example.com") -> Dict[str, Any]:
         """
