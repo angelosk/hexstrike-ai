@@ -15083,6 +15083,58 @@ def wafw00f():
             "error": f"Server error: {str(e)}"
         }), 500
 
+@app.route("/api/tools/axiom-scan", methods=["POST"])
+def axiom_scan():
+    """Distribute a scan across a provisioned Axiom fleet (pry0cc/axiom).
+
+    Requires an Axiom fleet to already be up (`axiom-fleet ...`). Wraps
+    `axiom-scan`, which fans a module (nuclei, httpx, nmap, ffuf, ...) across
+    the fleet and gathers results. See the 'Scaling with Axiom' README section.
+    Long fleet scans may need a larger COMMAND_TIMEOUT. (issue #134)
+    """
+    try:
+        params = request.json
+        targets = params.get("targets", "")        # comma/space/newline list, or a file path
+        module = params.get("module", "nuclei")    # axiom module to distribute
+        output_file = params.get("output_file", "")
+        additional_args = safe_additional_args(params.get("additional_args", ""))
+
+        if not targets:
+            logger.warning("🛰️  Axiom scan called without targets")
+            return jsonify({"error": "targets parameter is required (hosts/URLs or a file path)"}), 400
+
+        # axiom-scan consumes an input FILE of targets. Accept an existing path,
+        # or materialize an inline list into a temp file.
+        if os.path.isfile(str(targets)):
+            targets_file = str(targets)
+        else:
+            items = [t.strip() for t in re.split(r"[,\s]+", str(targets)) if t.strip()]
+            targets_file = str(Path(tempfile.gettempdir()) / f"axiom_targets_{int(time.time())}.txt")
+            with open(targets_file, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(items) + "\n")
+
+        if not output_file:
+            output_file = str(Path(tempfile.gettempdir()) / f"axiom_{module}_{int(time.time())}.txt")
+
+        command = f"axiom-scan {shlex.quote(targets_file)} -m {shlex.quote(module)}"
+        if additional_args:
+            command += f" {additional_args}"
+        command += f" -o {shlex.quote(output_file)}"
+
+        logger.info(f"🛰️  Starting Axiom distributed scan (module={module})")
+        result = execute_command(command)
+        if isinstance(result, dict):
+            result["module"] = module
+            result["output_file"] = output_file
+            result["targets_file"] = targets_file
+        logger.info(f"📊 Axiom scan completed (module={module}, out={output_file})")
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"💥 Error in axiom-scan endpoint: {str(e)}")
+        return jsonify({
+            "error": f"Server error: {str(e)}"
+        }), 500
+
 @app.route("/api/tools/fierce", methods=["POST"])
 def fierce():
     """Execute fierce for DNS reconnaissance with enhanced logging"""

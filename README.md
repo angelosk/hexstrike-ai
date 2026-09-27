@@ -596,6 +596,41 @@ uvx mcpo --port 8000 -- python3 /path/to/hexstrike-ai/hexstrike_mcp.py --server 
 
 Then in Open-WebUI go to **Settings → Tools** and add a tool server at `http://localhost:8000`. The tools appear as OpenAPI functions the model can call.
 
+### Cherry Studio Integration
+
+[Cherry Studio](https://github.com/CherryHQ/cherry-studio) is a desktop LLM client with MCP support. With `hexstrike_server.py` running, go to **Settings → MCP Servers → Add**, choose type **stdio**, and set:
+
+- **Command:** `python3`
+- **Arguments:** `/path/to/hexstrike-ai/hexstrike_mcp.py --server http://127.0.0.1:8888 --lazy`
+- **Environment:** `HEXSTRIKE_API_TOKEN=<the same token the server was started with>`
+
+Enable the server; the HexStrike tools are then available to whatever model you chat with in Cherry Studio.
+
+### Scaling with Axiom (distributed scanning)
+
+For large bug-bounty scopes, offload the fan-out-heavy steps to an [Axiom](https://github.com/pry0cc/axiom) fleet instead of a single host. HexStrike stays the orchestration brain; Axiom runs the distributed scan and returns results. A built-in `axiom_scan` tool (`POST /api/tools/axiom-scan`) wraps `axiom-scan`.
+
+1. Provision a fleet with Axiom's own tooling (HexStrike does **not** create or tear down instances):
+
+```bash
+axiom-fleet reapers -i 10
+```
+
+2. Run a distributed module via the tool / endpoint:
+
+```bash
+curl -X POST http://127.0.0.1:8888/api/tools/axiom-scan \
+  -H "X-HexStrike-Token: $HEXSTRIKE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"targets": "hosts.txt", "module": "nuclei", "additional_args": "-severity high,critical"}'
+```
+
+The server accepts an inline target list (materialized to a temp file) or a file path, runs `axiom-scan <targets> -m <module> … -o <output>` across the fleet, and returns the aggregated output path. Notes:
+
+- The fleet must already be up; provisioning/teardown stays with Axiom.
+- Long fleet scans can exceed the default 5-minute tool timeout — raise `COMMAND_TIMEOUT`.
+- Pairs well with the per-engagement Docker model: one control container orchestrating, the fleet doing the volume.
+
 ---
 
 ## Features

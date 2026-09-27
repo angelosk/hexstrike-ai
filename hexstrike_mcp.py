@@ -439,6 +439,42 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
     mcp.tool = custom_mcp_tool
 
     # ============================================================================
+    # DISTRIBUTED SCANNING (Axiom)
+    # ============================================================================
+
+    @mcp.tool()
+    def axiom_scan(targets: str, module: str = "nuclei", output_file: str = "", additional_args: str = "") -> Dict[str, Any]:
+        """
+        Distribute a scan across a provisioned Axiom fleet (pry0cc/axiom).
+
+        Requires an Axiom fleet already up (`axiom-fleet ...`). Fans `module`
+        across the fleet via axiom-scan and returns aggregated results. Good for
+        large bug-bounty scopes where a single host is a bottleneck.
+
+        Args:
+            targets: Hosts/URLs (comma/space/newline separated) or a path to a targets file
+            module: Axiom module to run across the fleet (e.g. nuclei, httpx, nmap, ffuf)
+            output_file: Optional path for aggregated output
+            additional_args: Extra args passed through to the module
+
+        Returns:
+            Aggregated scan results from the fleet
+        """
+        data = {
+            "targets": targets,
+            "module": module,
+            "output_file": output_file,
+            "additional_args": additional_args,
+        }
+        logger.info(f"🛰️  Initiating Axiom distributed scan (module={module})")
+        result = hexstrike_client.safe_post("api/tools/axiom-scan", data)
+        if result.get("success"):
+            logger.info(f"✅ Axiom scan completed (module={module})")
+        else:
+            logger.error(f"❌ Axiom scan failed (module={module})")
+        return result
+
+    # ============================================================================
     # CORE NETWORK SCANNING TOOLS
     # ============================================================================
 
