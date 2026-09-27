@@ -41,6 +41,29 @@ else
   log_error "[updater] /usr/local/bin/update-tools-databases.sh not found or not executable."
 fi
 
+# --- Authentication token (container must boot after the security hardening) ---
+# The server fails closed at import if HEXSTRIKE_API_TOKEN is unset (it refuses
+# to run unauthenticated). gunicorn imports hexstrike_server:app below, so the
+# token must be present now. Use the operator-supplied value when given; else
+# mint an ephemeral one and log it so it can be set as X-HexStrike-Token in the
+# MCP client. Pin your own in docker/.env to keep it stable across restarts.
+if [ -z "${HEXSTRIKE_API_TOKEN:-}" ]; then
+  if command -v openssl >/dev/null 2>&1; then
+    HEXSTRIKE_API_TOKEN="$(openssl rand -hex 32)"
+  else
+    HEXSTRIKE_API_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  fi
+  export HEXSTRIKE_API_TOKEN
+  log "[auth] HEXSTRIKE_API_TOKEN not provided; generated an ephemeral token:"
+  log "[auth]     ${HEXSTRIKE_API_TOKEN}"
+  log "[auth] Set this as X-HexStrike-Token in your MCP client, or pin your own via docker/.env."
+else
+  export HEXSTRIKE_API_TOKEN
+  log "[auth] Using HEXSTRIKE_API_TOKEN from the environment."
+fi
+# Raw command/code execution stays opt-in (issue #124); pass through if provided.
+export HEXSTRIKE_ALLOW_RAW_EXEC="${HEXSTRIKE_ALLOW_RAW_EXEC:-}"
+
 # --- Start HexStrike MCP server ---
 GUNICORN_BIN="/opt/hexstrike/venv/bin/gunicorn"
 if [ ! -x "$GUNICORN_BIN" ]; then

@@ -26,6 +26,12 @@ services:
     # Environment variables
     environment:
       - PYTHONUNBUFFERED=1
+      # Auth token the server requires to start (it refuses to run unauthenticated).
+      # Set HEXSTRIKE_API_TOKEN in docker/.env for a stable value; if left empty the
+      # entrypoint generates an ephemeral one and prints it to the container logs.
+      - HEXSTRIKE_API_TOKEN=${HEXSTRIKE_API_TOKEN:-}
+      # Arbitrary command/code exec endpoints stay disabled unless opted in (issue #124).
+      - HEXSTRIKE_ALLOW_RAW_EXEC=${HEXSTRIKE_ALLOW_RAW_EXEC:-}
       - COMMAND_TIMEOUT=3600
       # - DEBUG_MODE=true
       # - MCP_PORT=8888
