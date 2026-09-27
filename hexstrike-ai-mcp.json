@@ -3,7 +3,7 @@
     "hexstrike-ai-guided": {
       "command": "python3",
       "args": [
-        "/absolute/path/to/hexstrike-ai/hexstrike_mcp.py",
+        "hexstrike_mcp.py",
         "--server",
         "http://127.0.0.1:8888",
         "--health-timeout",
@@ -29,7 +29,7 @@
     "hexstrike-ai-full-auto": {
       "command": "python3",
       "args": [
-        "/absolute/path/to/hexstrike-ai/hexstrike_mcp.py",
+        "hexstrike_mcp.py",
         "--server",
         "http://127.0.0.1:8888",
         "--timeout",
@@ -43,7 +43,7 @@
   },
   "_comment": [
     "SETUP:",
-    "1. Replace /absolute/path/to/hexstrike-ai-update with your real checkout path (./install.sh does this automatically).",
+    "1. Paths are relative to this repo root: launch the AI client with the repo as its working directory (run in place). If your client launches from elsewhere, replace hexstrike_mcp.py with an absolute path to <repo>/hexstrike_mcp.py.",
     "2. Prefer the venv python: <repo>/hexstrike-env/bin/python instead of system python3.",
     "3. Start the server first: source hexstrike-env/bin/activate && python3 hexstrike_server.py",
     "4. --lazy avoids MCP 'Connection closed' kills when the server is still starting.",
