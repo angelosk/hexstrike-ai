@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# hexstrike_mcp.py
 """
 HexStrike AI MCP Client - Enhanced AI Agent Communication Interface
 
@@ -3624,7 +3625,7 @@ def setup_mcp_server(hexstrike_client: HexStrikeClient) -> FastMCP:
             logger.info(f"🤖 Generating {attack_type} payloads...")
 
             # Generate payloads for this attack type
-            payload_result = self.ai_generate_payload(attack_type, "advanced", "", target_url)
+            payload_result = ai_generate_payload(attack_type, "advanced", "", target_url)
 
             if payload_result.get("success"):
                 payload_data = payload_result.get("ai_payload_generation", {})
