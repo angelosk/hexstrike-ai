@@ -171,6 +171,25 @@ def _require_hexstrike_token():
     if not hmac.compare_digest(supplied, HEXSTRIKE_API_TOKEN):
         return jsonify({"error": "unauthorized"}), 401
 
+# ── Raw code-execution guard (issue #124) ───────────────────────────────
+# /api/command and /api/python/execute run caller-supplied code with the
+# server's privileges. They are authenticated (token gate above), but
+# arbitrary RCE should not be reachable by default even for an authenticated
+# caller: an injected instruction in scraped content driving the AI agent
+# could otherwise pivot straight to code execution. Require a deliberate
+# opt-in; the per-tool endpoints (/api/tools/*) are unaffected.
+RAW_EXEC_ENABLED = os.environ.get("HEXSTRIKE_ALLOW_RAW_EXEC", "").strip().lower() in ("1", "true", "yes", "on")
+
+def _raw_exec_guard():
+    """Return a (response, status) tuple to abort with when raw code-exec is
+    disabled, or None to allow the request through."""
+    if not RAW_EXEC_ENABLED:
+        return jsonify({
+            "error": "Raw command/code execution is disabled. Set HEXSTRIKE_ALLOW_RAW_EXEC=1 to enable /api/command and /api/python/execute.",
+            "endpoint_disabled": True,
+        }), 403
+    return None
+
 # ── Engagement scope enforcement ────────────────────────────────────────
 # This tool is for authorized penetration testing / ethical hacking only.
 # Without a scope check, an AI agent chaining tool calls (or content it
@@ -9182,10 +9201,21 @@ class FileOperationsManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.max_file_size = 100 * 1024 * 1024  # 100MB
 
+    def _safe_path(self, name: str) -> Path:
+        """Resolve *name* inside base_dir and reject any path that escapes the
+        sandbox (CWE-22 path traversal, issue #135). Blocks ``../`` sequences
+        and absolute paths, so a client-supplied filename can never read,
+        write, or delete outside self.base_dir."""
+        base = self.base_dir.resolve()
+        candidate = (base / name).resolve()
+        if candidate != base and base not in candidate.parents:
+            raise ValueError(f"path escapes sandbox: {name!r}")
+        return candidate
+
     def create_file(self, filename: str, content: str, binary: bool = False) -> Dict[str, Any]:
         """Create a file with the specified content"""
         try:
-            file_path = self.base_dir / filename
+            file_path = self._safe_path(filename)
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             if len(content.encode()) > self.max_file_size:
@@ -9208,7 +9238,7 @@ class FileOperationsManager:
     def modify_file(self, filename: str, content: str, append: bool = False) -> Dict[str, Any]:
         """Modify an existing file"""
         try:
-            file_path = self.base_dir / filename
+            file_path = self._safe_path(filename)
             if not file_path.exists():
                 return {"success": False, "error": "File does not exist"}
 
@@ -9226,7 +9256,9 @@ class FileOperationsManager:
     def delete_file(self, filename: str) -> Dict[str, Any]:
         """Delete a file or directory"""
         try:
-            file_path = self.base_dir / filename
+            file_path = self._safe_path(filename)
+            if file_path == self.base_dir.resolve():
+                return {"success": False, "error": "Refusing to delete the sandbox root"}
             if not file_path.exists():
                 return {"success": False, "error": "File does not exist"}
 
@@ -9245,7 +9277,7 @@ class FileOperationsManager:
     def list_files(self, directory: str = ".") -> Dict[str, Any]:
         """List files in a directory"""
         try:
-            dir_path = self.base_dir / directory
+            dir_path = self._safe_path(directory)
             if not dir_path.exists():
                 return {"success": False, "error": "Directory does not exist"}
 
@@ -9513,6 +9545,9 @@ def health_check():
 @app.route("/api/command", methods=["POST"])
 def generic_command():
     """Execute any command provided in the request with enhanced logging"""
+    guard = _raw_exec_guard()
+    if guard:
+        return guard
     try:
         params = request.json
         command = params.get("command", "")
@@ -15111,6 +15146,9 @@ def install_python_package():
 @app.route("/api/python/execute", methods=["POST"])
 def execute_python_script():
     """Execute a Python script in a virtual environment"""
+    guard = _raw_exec_guard()
+    if guard:
+        return guard
     try:
         params = request.json
         script = params.get("script", "")
@@ -16416,11 +16454,15 @@ def threat_intelligence_feeds():
 
                 # Search for existing exploits
                 exploits = cve_intelligence.search_existing_exploits(cve_id)
-                if exploits.get("success") and exploits.get("total_exploits", 0) > 0:
+                # search_existing_exploits() emits the count under "exploits_found";
+                # reading "total_exploits" (a key it never sets) silently zeroed this
+                # branch, so the exploit-availability boost never applied (issue #261).
+                exploit_count = exploits.get("exploits_found", exploits.get("total_exploits", 0))
+                if exploits.get("success") and exploit_count > 0:
                     correlation_results["correlations"].append({
                         "indicator": cve_id,
                         "type": "exploit_availability",
-                        "exploits_found": exploits.get("total_exploits", 0),
+                        "exploits_found": exploit_count,
                         "threat_level": "HIGH"
                     })
                     correlation_results["threat_score"] += 25
@@ -16428,31 +16470,41 @@ def threat_intelligence_feeds():
             except Exception as e:
                 logger.warning(f"Error analyzing CVE {cve_id}: {str(e)}")
 
-        # Process IP indicators (basic reputation check simulation)
+        # Process IP indicators.
+        # NOTE: no live IP-reputation provider is wired up. Return an explicitly
+        # simulated placeholder rather than presenting a fixed "MEDIUM" verdict as
+        # real analysis (issue #261). threat_level is UNKNOWN so operators and AI
+        # agents don't treat an unconfigured lookup as a genuine finding.
         for ip in ip_indicators:
-            # Simulate threat intelligence lookup
             correlation_results["correlations"].append({
                 "indicator": ip,
                 "type": "ip_reputation",
+                "simulated": True,
                 "analysis": {
                     "reputation": "unknown",
                     "geolocation": "unknown",
-                    "associated_threats": []
+                    "associated_threats": [],
+                    "note": "Placeholder result — no IP-reputation provider configured; not real threat intelligence."
                 },
-                "threat_level": "MEDIUM"  # Default for unknown IPs
+                "threat_level": "UNKNOWN"
             })
 
-        # Process hash indicators
+        # Process hash indicators.
+        # NOTE: no live file-hash/AV provider is wired up. Mark the result as
+        # simulated instead of presenting a fixed "MEDIUM" verdict as real
+        # analysis (issue #261).
         for hash_val in hash_indicators:
             correlation_results["correlations"].append({
                 "indicator": hash_val,
                 "type": "file_hash",
+                "simulated": True,
                 "analysis": {
                     "hash_type": f"hash{len(hash_val)}",
                     "malware_family": "unknown",
-                    "detection_rate": "unknown"
+                    "detection_rate": "unknown",
+                    "note": "Placeholder result — no file-hash reputation provider configured; not real threat intelligence."
                 },
-                "threat_level": "MEDIUM"
+                "threat_level": "UNKNOWN"
             })
 
         # Calculate overall threat score and generate recommendations
